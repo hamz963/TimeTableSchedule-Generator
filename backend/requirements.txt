@@ -1,0 +1,24 @@
+fastapi==0.142.4
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.4
+psycopg2-binary==2.9.13
+pydantic==2.13.5
+pydantic-settings==2.15.0
+ortools==9.15.6755
+celery==5.3.6
+redis==5.0.1
+python-multipart==0.0.32
+PyJWT==2.15.1
+pytest==9.1.1
+httpx==0.28.1
+alembic==1.13.1
+python-dotenv==1.2.4
+# Machine learning (preference learning)
+pandas==3.0.6
+numpy==2.5.3
+scikit-learn==1.9.1
+joblib==1.6.0
+# Multi-format export
+openpyxl==3.1.5           # Excel export
+reportlab==5.0.1          # PDF export
+pillow==12.3.0            # Image export (PNG/JPG)

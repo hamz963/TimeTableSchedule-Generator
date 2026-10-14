@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+frontend/.next/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.pkl
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+backend/.env
+
+# Local databases & artifacts
+*.db
+*.sqlite3
