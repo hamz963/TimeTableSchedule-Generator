@@ -27,6 +27,126 @@ _DAY_ALIASES = {
 }
 
 
+# Rule param keys that reference session ids (accept names or ids on input).
+_COURSE_LIST_KEYS = ("course_a", "course_b", "courses")
+_COURSE_SCALAR_KEYS = ("course_id",)
+
+
+def _as_id_list(value) -> List[int]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [int(v) for v in value]
+    return [int(value)]
+
+
+def resolve_rules(
+    rules_in: List[Dict[str, Any]],
+    course_sessions: Dict[str, List[int]],
+    teacher_ids: Dict[str, int],
+    strict: bool = True,
+) -> List[Dict[str, Any]]:
+    """Resolve human-friendly rule params (course/teacher names) into ids.
+
+    Multi-session courses (credit_hours > 1) expand to every session id so a
+    rule like ``course_before`` applies across all of a course's meetings.
+
+    With ``strict=True`` an unknown reference raises ValidationError (used for
+    user-supplied inline rules). With ``strict=False`` (used for persisted
+    constraint rows, which are global) an unresolvable rule is skipped instead
+    of failing the whole request.
+    """
+    out: List[Dict[str, Any]] = []
+    for raw in rules_in or []:
+        try:
+            kind = raw.get("kind")
+            if not kind:
+                raise ValidationError("every rule needs a 'kind'")
+            params = dict(raw.get("params") or {})
+
+            def _course_ref(val, key):
+                if isinstance(val, str):
+                    if val not in course_sessions:
+                        raise ValidationError(f"rule '{kind}': unknown course '{val}' in {key}")
+                    return list(course_sessions[val])
+                return _as_id_list(val)
+
+            for key in _COURSE_LIST_KEYS:
+                if key in params:
+                    params[key] = _course_ref(params[key], key)
+            for key in _COURSE_SCALAR_KEYS:
+                if key in params:
+                    params[key] = _course_ref(params[key], key)
+
+            # forbid_slot entity resolution
+            if kind == "forbid_slot":
+                entity = (params.get("entity") or "course").lower()
+                ref = params.get("id")
+                if isinstance(ref, str):
+                    if entity == "course":
+                        if ref not in course_sessions:
+                            raise ValidationError(f"rule 'forbid_slot': unknown course '{ref}'")
+                        params["id"] = list(course_sessions[ref])
+                    elif entity in ("faculty", "teacher"):
+                        if ref not in teacher_ids:
+                            raise ValidationError(f"rule 'forbid_slot': unknown teacher '{ref}'")
+                        params["id"] = teacher_ids[ref]
+                    else:
+                        raise ValidationError("rule 'forbid_slot': venue id must be numeric")
+
+            out.append({
+                "kind": kind,
+                "params": params,
+                "hard": raw.get("hard"),
+                "weight": float(raw.get("weight", 1.0) or 1.0),
+                "name": raw.get("name", "") or kind,
+            })
+        except ValidationError:
+            if strict:
+                raise
+            continue
+    return out
+
+
+def name_maps_from_summary(summary: Dict[str, Any]):
+    """Rebuild (course base name -> session ids, teacher name -> id) from a
+    run summary, so persisted constraint rows can be resolved after rebasing."""
+    import re as _re
+
+    course_sessions: Dict[str, List[int]] = {}
+    for cid, label in (summary.get("course_labels") or {}).items():
+        base = _re.sub(r"\s*\(\d+/\d+\)$", "", str(label)).strip()
+        if base:
+            course_sessions.setdefault(base, []).append(int(cid))
+    teacher_ids = {str(name): int(fid) for fid, name in (summary.get("teacher_names") or {}).items()}
+    return course_sessions, teacher_ids
+
+
+def rebase_rules(rules, fid_map, vid_map, sid_map, cid_map):
+    """Shift every id inside rule params into the dataset's rebased id space."""
+    out = []
+    for r in rules or []:
+        r = {**r, "params": dict(r.get("params") or {})}
+        p = r["params"]
+        for key in ("course_a", "course_b", "courses", "course_id", "sessions"):
+            if key in p:
+                p[key] = [cid_map[int(v)] for v in _as_id_list(p[key]) if int(v) in cid_map]
+        if "slot_id" in p:
+            p["slot_id"] = sid_map.get(int(p["slot_id"]), p["slot_id"])
+        if "venue_id" in p and p["venue_id"] is not None:
+            p["venue_id"] = vid_map.get(int(p["venue_id"]), p["venue_id"])
+        if "slots" in p:
+            p["slots"] = [sid_map[int(v)] for v in _as_id_list(p["slots"]) if int(v) in sid_map]
+        if r.get("kind") == "forbid_slot" and "id" in p:
+            entity = (p.get("entity") or "course").lower()
+            mapping = {"course": cid_map, "faculty": fid_map, "teacher": fid_map,
+                       "venue": vid_map, "room": vid_map}.get(entity)
+            if mapping is not None:
+                p["id"] = [mapping[int(v)] for v in _as_id_list(p["id"]) if int(v) in mapping]
+        out.append(r)
+    return out
+
+
 def normalize_day(value: str) -> str:
     """Accept 'Mon', 'monday', 'MON' ... -> canonical 'Mon'."""
     key = (value or "").strip().lower()
@@ -170,6 +290,7 @@ def build_problem(payload: Dict[str, Any]) -> Dict[str, Any]:
     courses: List[Dict[str, Any]] = []
     session_groups: List[List[int]] = []
     course_labels: Dict[int, str] = {}
+    course_sessions: Dict[str, List[int]] = {}  # base course name -> session ids
     cid = 1
     for c in courses_in:
         n = int(c.get("credit_hours", 1))
@@ -199,6 +320,7 @@ def build_problem(payload: Dict[str, Any]) -> Dict[str, Any]:
             course_labels[cid] = label
             group.append(cid)
             cid += 1
+        course_sessions[c["name"].strip()] = list(group)
         if len(group) > 1:
             session_groups.append(group)
     # Student groups: all sessions of one group never meet simultaneously.
@@ -251,6 +373,8 @@ def build_problem(payload: Dict[str, Any]) -> Dict[str, Any]:
             f"{total_sessions} sessions are needed; add rooms or extend hours"
         )
 
+    rules = resolve_rules(payload.get("rules", []) or [], course_sessions, teacher_id)
+
     summary = {
         "teachers": len(faculty),
         "courses": len(courses_in),
@@ -276,6 +400,8 @@ def build_problem(payload: Dict[str, Any]) -> Dict[str, Any]:
             "teaching load spread evenly across days (no bunched days)",
             "lunch break is free for everyone",
         ],
+        "rules": [{"kind": r["kind"], "name": r["name"], "hard": r["hard"]}
+                  for r in rules],
         "course_labels": {str(k): v for k, v in course_labels.items()},
         "slot_labels": {str(s["id"]): s["label"] for s in slots},
         "teacher_names": {str(f["id"]): f["name"] for f in faculty},
@@ -295,6 +421,7 @@ def build_problem(payload: Dict[str, Any]) -> Dict[str, Any]:
         "slots": slots,
         "courses": courses,
         "session_groups": session_groups,
+        "rules": rules,
         "summary": summary,
     }
 
@@ -353,6 +480,8 @@ def rebase_ids(problem: Dict[str, Any], base: int) -> Dict[str, Any]:
         c["faculty_id"] = fid[c["faculty_id"]]
         c["code"] = f"AUTO-{c['id']:06d}"  # unique per dataset (ids are rebased)
     problem["session_groups"] = [[cid[i] for i in g] for g in problem["session_groups"]]
+    if problem.get("rules"):
+        problem["rules"] = rebase_rules(problem["rules"], fid, vid, sid, cid)
 
     summary = problem.get("summary", {})
     for key, mapping in (("course_labels", cid), ("slot_labels", sid),

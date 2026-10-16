@@ -176,5 +176,17 @@ def apply_edit(db, run_id: int, op: Dict[str, Any], persist: bool = True) -> Dic
             solver_time_ms=0, conflict_count=0,
         ))
     db.commit()
+    try:
+        from app.services.events import broker
+
+        broker.publish({
+            "type": "schedule.edited",
+            "run_id": run_id,
+            "new_run_id": new_run.id,
+            "op": kind,
+            "sessions": len(assignments),
+        })
+    except Exception:  # pragma: no cover - events must never break an edit
+        pass
     return {"new_run_id": new_run.id, "assignments": assignments,
             "total_courses_scheduled": len(assignments)}

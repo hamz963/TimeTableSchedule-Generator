@@ -31,6 +31,7 @@ export default function Nav() {
             <a href="/schedule/easy" className="text-sm hover:underline">Easy Builder</a>
             <a href="/chat" className="text-sm hover:underline">Chat</a>
             <a href="/analytics" className="text-sm hover:underline">Analytics</a>
+            <a href="/benchmark" className="text-sm hover:underline">Benchmark</a>
           </>
         )}
         {user && isTeacher && (

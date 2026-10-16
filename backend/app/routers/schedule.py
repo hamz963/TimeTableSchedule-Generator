@@ -15,10 +15,14 @@ from app.services.planner import (
     ID_BLOCK,
     build_id_maps,
     build_problem,
+    name_maps_from_summary,
     next_id_block,
     rebase_ids,
+    rebase_rules,
+    resolve_rules,
     summarize_advanced,
 )
+from app.engine.rules import build_rules, rule_catalog
 from app.services.solver import TimetableSolver
 from app.services.validator import (
     PayloadTooLargeError,
@@ -28,6 +32,36 @@ from app.services.validator import (
 
 router = APIRouter(prefix="/schedule", tags=["schedule"],
                    dependencies=[Depends(require_scheduler)])
+
+
+@router.get("/rules/catalog")
+def rules_catalog():
+    """Machine-readable catalog of supported declarative rule kinds."""
+    return {"rules": rule_catalog()}
+
+
+def _persisted_rules(db: Session) -> list:
+    """Active constraint rows shaped as rule dicts (kind/params/hard/weight).
+
+    This is what makes the Constraint CRUD drive the solver instead of being
+    decorative. Rows without a ``constraint_data.kind`` are ignored.
+    """
+    from app.models.constraint import Constraint
+
+    out = []
+    for c in db.query(Constraint).all():
+        data = c.constraint_data or {}
+        kind = data.get("kind")
+        if not kind:
+            continue
+        out.append({
+            "kind": kind,
+            "params": data.get("params") or {},
+            "hard": c.type != "soft",
+            "weight": c.weight,
+            "name": c.name,
+        })
+    return out
 
 
 def _parse_hhmm(value: str) -> dtime:
@@ -121,7 +155,8 @@ def _persist_masters(
     db.flush()
 
 
-def _persist_result(db: Session, result, status_label: str, summary: Optional[dict] = None) -> int:
+def _persist_result(db: Session, result, status_label: str, summary: Optional[dict] = None,
+                    event_type: str = "schedule.created") -> int:
     run = ScheduleRun(
         completed_at=datetime.now(timezone.utc),
         total_time_ms=result.solver_time_ms,
@@ -146,6 +181,21 @@ def _persist_result(db: Session, result, status_label: str, summary: Optional[di
             )
         )
     db.commit()
+    # Broadcast for live dashboards / notifications (best-effort, never fatal).
+    try:
+        from app.services.events import broker
+
+        broker.publish({
+            "type": event_type,
+            "run_id": run.id,
+            "status": result.status,
+            "sessions": len(result.assignments),
+            "quality_score": (result.metrics or {}).get("score", {}).get("score")
+            if isinstance(result.metrics, dict) else None,
+            "engine_path": (result.engine or {}).get("path"),
+        })
+    except Exception:  # pragma: no cover - events must never break a request
+        pass
     return run.id
 
 
@@ -194,6 +244,14 @@ def generate_schedule(payload: GenerateRequest, db: Session = Depends(get_db)):
                            "venue_id": vid_map[l["venue_id"]],
                            "slot_id": sid_map[l["slot_id"]]})
 
+        raw_rules = [r.model_dump() for r in payload.rules]
+        # Merge persisted constraint rows (global) with inline rules; persisted
+        # rows that reference entities absent from this dataset are skipped.
+        course_map = {c.get("name", ""): [c["id"]] for c in courses if c.get("name")}
+        teacher_map = {f.get("name", ""): f["id"] for f in faculty if f.get("name")}
+        raw_rules += resolve_rules(_persisted_rules(db), course_map, teacher_map, strict=False)
+        rules = build_rules(rebase_rules(raw_rules, fid_map, vid_map, sid_map, cid_map))
+
         result = TimetableSolver.generate(
             faculty=faculty,
             venues=venues,
@@ -201,6 +259,7 @@ def generate_schedule(payload: GenerateRequest, db: Session = Depends(get_db)):
             courses=courses,
             time_limit_seconds=payload.time_limit_seconds,
             locked_assignments=locked or None,
+            rules=rules or None,
         )
         if result.status in ("infeasible", "timeout") and not result.assignments:
             raise HTTPException(
@@ -211,6 +270,8 @@ def generate_schedule(payload: GenerateRequest, db: Session = Depends(get_db)):
         try:
             _persist_masters(db, faculty, venues, slots, courses)
             summary = summarize_advanced(faculty, venues, slots, courses)
+            summary["quality"] = result.metrics
+            summary["engine"] = result.engine
             run_id = _persist_result(db, result, "completed", summary)
         except _IntegrityError:
             db.rollback()
@@ -230,6 +291,8 @@ def generate_schedule(payload: GenerateRequest, db: Session = Depends(get_db)):
         conflicts_resolved=result.conflicts_resolved,
         objective_value=result.objective_value,
         summary=summary,
+        quality=result.metrics,
+        engine=result.engine,
     )
 
 
@@ -268,6 +331,11 @@ def generate_simple(payload: SimpleGenerateRequest, db: Session = Depends(get_db
         if payload.use_ml_preferences:
             _apply_ml_preferences(db, problem)
 
+        # Persisted constraint rows are global: resolve them against this
+        # dataset's ids and append (non-strict — unresolvable ones are skipped).
+        course_map, teacher_map = name_maps_from_summary(problem["summary"])
+        extra = resolve_rules(_persisted_rules(db), course_map, teacher_map, strict=False)
+        rules = build_rules(list(problem.get("rules") or []) + extra)
         result = TimetableSolver.generate(
             faculty=faculty,
             venues=venues,
@@ -276,6 +344,7 @@ def generate_simple(payload: SimpleGenerateRequest, db: Session = Depends(get_db
             time_limit_seconds=payload.time_limit_seconds,
             session_groups=problem["session_groups"],
             max_consecutive=int(payload.max_consecutive_periods),
+            rules=rules or None,
         )
         if result.status in ("infeasible", "timeout") and not result.assignments:
             raise HTTPException(
@@ -283,6 +352,8 @@ def generate_simple(payload: SimpleGenerateRequest, db: Session = Depends(get_db
                 detail=f"Solver could not find a feasible timetable (status={result.status}). "
                 "Try adding rooms, extending day_start/day_end, or lowering credit hours.",
             )
+        problem["summary"]["quality"] = result.metrics
+        problem["summary"]["engine"] = result.engine
         try:
             _persist_masters(db, faculty, venues, slots, courses)
             run_id = _persist_result(db, result, "completed", problem["summary"])
@@ -304,6 +375,8 @@ def generate_simple(payload: SimpleGenerateRequest, db: Session = Depends(get_db
         conflicts_resolved=result.conflicts_resolved,
         objective_value=result.objective_value,
         summary=problem["summary"],
+        quality=result.metrics,
+        engine=result.engine,
     )
 
 
@@ -408,15 +481,20 @@ def reschedule(payload: RescheduleRequest, db: Session = Depends(get_db)):
         c["id"] = cid_map[c["id"]]
         c["faculty_id"] = fid_map[c["faculty_id"]]
 
+    rules = build_rules(rebase_rules([r.model_dump() for r in payload.rules],
+                                     fid_map, vid_map, sid_map, cid_map))
     result = TimetableSolver.generate(
         faculty=faculty, venues=venues, slots=slots, courses=courses,
         time_limit_seconds=payload.time_limit_seconds, previous=previous,
+        rules=rules or None,
     )
     if result.status in ("infeasible", "timeout") and not result.assignments:
         raise HTTPException(status_code=422, detail=f"Reschedule infeasible (status={result.status})")
     _persist_masters(db, faculty, venues, slots, courses)
     summary = summarize_advanced(faculty, venues, slots, courses)
-    run_id = _persist_result(db, result, "completed", summary)
+    summary["quality"] = result.metrics
+    summary["engine"] = result.engine
+    run_id = _persist_result(db, result, "completed", summary, event_type="schedule.rescheduled")
     return GenerateResponse(
         schedule_run_id=run_id,
         status=result.status,
@@ -426,6 +504,8 @@ def reschedule(payload: RescheduleRequest, db: Session = Depends(get_db)):
         conflicts_resolved=result.conflicts_resolved,
         objective_value=result.objective_value,
         summary=summary,
+        quality=result.metrics,
+        engine=result.engine,
     )
 
 

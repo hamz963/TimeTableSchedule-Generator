@@ -1,4 +1,10 @@
 """Shared SQLite-backed TestClient: one engine for the whole suite."""
+import os
+
+# The suite fires hundreds of requests from one test IP; disable throttling so
+# it never trips. The dedicated security test re-enables it explicitly.
+os.environ.setdefault("RATE_LIMIT_PER_MINUTE", "0")
+
 from typing import Optional
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

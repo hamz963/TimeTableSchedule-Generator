@@ -1,28 +1,13 @@
-"""Dataset upload router: files or CSV text -> Easy Builder draft payload."""
-from typing import Any, Dict, List, Optional
+"""Dataset upload router: a CSV/Excel file -> Easy Builder draft payload."""
+from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
 
 from app.auth import get_current_user
-
-from app.utils.csv_parser import parse_courses_csv, parse_teachers_csv
 
 router = APIRouter(tags=["upload"], dependencies=[Depends(get_current_user)])
 
 GUIDE_COLUMNS = ["teacher_name", "course_name", "credit_hours", "student_group", "preferred_time"]
 _BANDS = ("Morning", "Afternoon", "Evening")
-
-
-class ParsePayload(BaseModel):
-    teachers_csv: Optional[str] = ""
-    courses_csv: Optional[str] = ""
-
-
-@router.post("/upload/parse")
-def parse_upload(payload: ParsePayload):
-    teachers, w1 = parse_teachers_csv(payload.teachers_csv or "")
-    courses, w2 = parse_courses_csv(payload.courses_csv or "")
-    return {"teachers": teachers, "courses": courses, "warnings": w1 + w2}
 
 
 def _rows_from_workbook(data: bytes) -> List[List[str]]:

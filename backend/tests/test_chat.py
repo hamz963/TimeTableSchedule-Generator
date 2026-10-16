@@ -1,4 +1,4 @@
-"""Chat + CSV-upload tests (shared API client)."""
+"""Chat conversation tests (shared API client)."""
 from app.services import chat as chat_service
 from tests.shared import get_client
 
@@ -75,27 +75,6 @@ def test_chat_generate_overrides():
                     json={"views": ["master"], "formats": ["json"]})
     assert g.status_code == 200
     assert g.json()["schedules_generated"] == 1
-
-
-def test_upload_parse_teachers_and_courses():
-    r = client.post("/upload/parse", json={
-        "teachers_csv": "# comment\nname,max_hours\nAlice,6\nBob,4,Fri",
-        "courses_csv": "course,teacher,credits\nMath,Alice,3\nArt,Bob,1,25",
-    })
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["teachers"][0] == {"name": "Alice", "max_hours_per_day": 6, "unavailable_days": []}
-    assert body["teachers"][1]["unavailable_days"] == ["Fri"]
-    assert body["courses"][0]["credit_hours"] == 3
-    assert body["courses"][1]["capacity_required"] == 25
-    # parsed payload feeds generate-simple directly
-    r2 = client.post("/schedule/generate-simple", json={
-        "teachers": body["teachers"], "courses": body["courses"], "rooms": [],
-        "days": ["Mon", "Tue", "Wed"], "day_start": "08:00", "day_end": "13:00",
-        "period_minutes": 60, "gap_minutes": 10, "lunch_break": False,
-    })
-    assert r2.status_code == 200, r2.text
-    assert r2.json()["total_courses_scheduled"] == 4
 
 
 def _edit_run():

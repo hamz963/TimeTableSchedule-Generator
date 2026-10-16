@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import TimetableGrid from "@/components/TimetableGrid";
 import Analytics from "@/components/Analytics";
@@ -8,10 +8,16 @@ import ExportOptions from "@/components/ExportOptions";
 import ChatBot from "@/components/ChatBot";
 import ScheduleEditor from "@/components/ScheduleEditor";
 import TeacherList from "@/components/TeacherList";
+import QualityPanel from "@/components/QualityPanel";
+import ViewRenderer from "@/components/ViewRenderer";
+import LiveEvents from "@/components/LiveEvents";
+
+const VIEWS = ["master", "teacher", "student", "staff", "canteen"];
 
 export default function ScheduleDetail({ params }: { params: { id: string } }) {
   const [schedule, setSchedule] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [quality, setQuality] = useState<any>(null);
   const [teacherView, setTeacherView] = useState<any>(null);
   const [viewName, setViewName] = useState("master");
   const [viewData, setViewData] = useState<any>(null);
@@ -26,6 +32,7 @@ export default function ScheduleDetail({ params }: { params: { id: string } }) {
         setSchedule(await api(`/schedule/${params.id}`));
         setAnalytics(await api(`/analytics/schedule/${params.id}`));
         setTeacherView(await api(`/schedule/${params.id}/views?view=teacher`));
+        setQuality(await api(`/quality/${params.id}`).catch(() => null));
       } catch (e: any) {
         setError(e.message);
       }
@@ -42,8 +49,22 @@ export default function ScheduleDetail({ params }: { params: { id: string } }) {
     })();
   }, [params.id, viewName, refreshKey]);
 
+  const onLiveEvent = useCallback(
+    (event: any) => {
+      // Refresh when this timetable (or an edit of it) is affected elsewhere.
+      if (
+        String(event.run_id) === String(params.id) ||
+        String(event.new_run_id) === String(params.id)
+      ) {
+        refresh();
+      }
+    },
+    [params.id],
+  );
+
   if (error) return <p className="text-red-600">{error}</p>;
   if (!schedule) return <p>Loading…</p>;
+
   const teacherNames = (teacherView?.teachers ?? []).map((t: any) => t.name);
   const summary = schedule.summary ?? {};
   const toMap = (rows: any[], labelMap: any, labelKey = "name") => {
@@ -60,9 +81,13 @@ export default function ScheduleDetail({ params }: { params: { id: string } }) {
       summary.slot_labels,
     ),
   };
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Timetable #{params.id}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Timetable #{params.id}</h1>
+        <LiveEvents onEvent={onLiveEvent} />
+      </div>
       <p className="text-sm text-gray-500">
         Status: {schedule.solver_status} · {schedule.total_time_ms} ms ·{" "}
         {schedule.total_courses_scheduled} courses
@@ -75,21 +100,23 @@ export default function ScheduleDetail({ params }: { params: { id: string } }) {
 
       <div className="space-y-2">
         <h2 className="text-xl font-bold">Audience view</h2>
-        <div className="flex gap-2 text-sm">
-          {["master", "teacher", "student", "staff", "canteen"].map((v) => (
+        <div className="flex flex-wrap gap-2 text-sm">
+          {VIEWS.map((v) => (
             <button
               key={v}
               onClick={() => setViewName(v)}
-              className={`rounded border px-3 py-1 capitalize ${viewName === v ? "bg-blue-600 text-white" : ""}`}
+              className={`rounded border px-3 py-1 capitalize ${
+                viewName === v ? "bg-blue-600 text-white" : ""
+              }`}
             >
               {v}
             </button>
           ))}
         </div>
-        <pre className="max-h-96 overflow-auto rounded border bg-gray-50 p-3 text-xs dark:bg-gray-900">
-          {viewData ? JSON.stringify(viewData, null, 2) : "Loading…"}
-        </pre>
+        <ViewRenderer data={viewData} />
       </div>
+
+      <QualityPanel report={quality} />
 
       <ExportOptions scheduleId={params.id} />
 

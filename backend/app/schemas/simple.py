@@ -8,6 +8,8 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 import re
 
+from app.schemas.rule import RuleInput
+
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 _TIME_BANDS = ("", "Morning", "Afternoon", "Evening")
 
@@ -65,6 +67,7 @@ class SimpleGenerateRequest(BaseModel):
     )
     use_ml_preferences: bool = False  # fill slot preferences from learned model
     time_limit_seconds: float = Field(default=5.0, gt=0, le=60)
+    rules: List[RuleInput] = Field(default_factory=list)  # declarative constraints
 
     @field_validator("day_start")
     @classmethod

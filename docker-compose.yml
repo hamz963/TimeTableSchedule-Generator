@@ -19,14 +19,18 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: ./backend
     environment:
       DATABASE_URL: postgresql+psycopg2://timetable:timetable@postgres:5432/timetable
+      # Redis provides shared chat state + the cross-replica event bus.
       REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
@@ -35,19 +39,6 @@ services:
       redis:
         condition: service_started
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-  worker:
-    build: ./backend
-    environment:
-      DATABASE_URL: postgresql+psycopg2://timetable:timetable@postgres:5432/timetable
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    command: celery -A app.tasks.celery_app worker --loglevel=info
 
   frontend:
     build: ./frontend

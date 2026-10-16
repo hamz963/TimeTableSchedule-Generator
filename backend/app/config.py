@@ -13,13 +13,23 @@ class Settings(BaseSettings):
     debug: bool = False
 
     database_url: str = "postgresql+psycopg2://timetable:timetable@localhost:5432/timetable"
-    # Sync URL used by SQLAlchemy; async not required for this service.
+    # Redis backs shared chat state + the real-time event bus across replicas.
+    # When unreachable, the app degrades to in-process state (single replica).
     redis_url: str = "redis://localhost:6379/0"
-    celery_broker_url: str = "redis://localhost:6379/0"
-    celery_result_backend: str = "redis://localhost:6379/0"
+    chat_ttl_seconds: int = 3600  # chat conversation lifetime in Redis
+    events_channel: str = "timetable:events"
+
+    # Rate limiting (per client IP). 0 disables.
+    rate_limit_per_minute: int = 120
+    rate_limit_burst: int = 40
+    # Require a valid JWT (as ?token=) on the SSE stream.
+    events_require_auth: bool = False
 
     solver_time_limit_seconds: float = 5.0
     solver_num_workers: int = 8
+    #: Wall-clock budget (seconds) the metaheuristic optimizer may spend on the
+    #: large-instance path. Capped by the remaining request budget.
+    solver_optimize_seconds: float = 1.5
     max_hours_per_day_default: int = 6
 
     cors_origins: str = "http://localhost:3000"

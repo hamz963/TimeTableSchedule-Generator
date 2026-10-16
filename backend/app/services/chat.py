@@ -11,6 +11,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from app.services.ai_provider import polish_reply
+from app.services.chat_store import get_chat_store
 
 VIEW_KEYWORDS = {
     "master": ["master", "university", "overall", "full", "complete", "entire", "all"],
@@ -37,12 +38,10 @@ TIME_KEYWORDS = {
 
 VIEW_ORDER = ["master", "teacher", "student", "staff", "canteen"]
 
-_conversations: Dict[str, Dict[str, Any]] = {}
-
 
 def start_conversation(schedule_run_id: Optional[int] = None) -> Dict[str, Any]:
     cid = uuid.uuid4().hex[:12]
-    _conversations[cid] = {
+    get_chat_store().set(cid, {
         "schedule_run_id": schedule_run_id,
         "views": set(),
         "formats": set(),
@@ -50,7 +49,7 @@ def start_conversation(schedule_run_id: Optional[int] = None) -> Dict[str, Any]:
         "asked_time": False,
         "history": [],
         "pending_edit": None,
-    }
+    })
     greeting = (
         "Hi! I'm your scheduling assistant. "
         "Which schedules do you need? (e.g. teacher schedules, student schedules, canteen staff)"
@@ -68,9 +67,19 @@ def _detect(text: str, table: Dict[str, List[str]]) -> List[str]:
 
 def send_message(conversation_id: str, message: str, db=None,
                  actor_role: str = "scheduler") -> Dict[str, Any]:
-    convo = _conversations.get(conversation_id)
+    store = get_chat_store()
+    convo = store.get(conversation_id)
     if convo is None:
         raise KeyError("conversation not found")
+    try:
+        return _handle_message(convo, conversation_id, message, db, actor_role)
+    finally:
+        # Persist mutations (pending_edit, history, selections) back to the store.
+        store.set(conversation_id, convo)
+
+
+def _handle_message(convo: Dict[str, Any], conversation_id: str, message: str,
+                    db=None, actor_role: str = "scheduler") -> Dict[str, Any]:
     text = message or ""
     lowered = f" {text.lower()} "
 
@@ -188,14 +197,14 @@ def _answer(convo, conversation_id, reply, views, formats, status,
 
 
 def get_conversation(conversation_id: str) -> Dict[str, Any]:
-    convo = _conversations.get(conversation_id)
+    convo = get_chat_store().get(conversation_id)
     if convo is None:
         raise KeyError("conversation not found")
     return convo
 
 
 def clear_conversations() -> None:  # test isolation
-    _conversations.clear()
+    get_chat_store().clear()
 
 
 # -- interactive editing ------------------------------------------------------

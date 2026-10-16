@@ -2,6 +2,8 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+from app.schemas.rule import RuleInput
+
 
 class FacultyInput(BaseModel):
     id: int
@@ -46,6 +48,9 @@ class GenerateRequest(BaseModel):
     time_limit_seconds: float = Field(default=5.0, gt=0, le=60)
     # Optional pinned assignments to preserve: [{course_id, venue_id, slot_id}]
     locked_assignments: List[Dict[str, Any]] = Field(default_factory=list)
+    # Optional declarative rules (course_before, forbid_slot, ...) that the
+    # solver is required to honour.
+    rules: List[RuleInput] = Field(default_factory=list)
 
 
 class Assignment(BaseModel):
@@ -64,6 +69,10 @@ class GenerateResponse(BaseModel):
     conflicts_resolved: int = 0
     objective_value: Optional[float] = None
     summary: Dict[str, Any] = Field(default_factory=dict)
+    #: Quality score + explainability (populated by the engine).
+    quality: Dict[str, Any] = Field(default_factory=dict)
+    #: Which engine path ran (exact | heuristic) + optimizer statistics.
+    engine: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RescheduleRequest(BaseModel):
@@ -75,6 +84,7 @@ class RescheduleRequest(BaseModel):
     # e.g. {"unavailable_venue_slots": [{"venue_id": 1, "slot_id": 2}], "cancelled": [course_id]}
     changes: Dict[str, Any] = Field(default_factory=dict)
     time_limit_seconds: float = Field(default=5.0, gt=0, le=60)
+    rules: List[RuleInput] = Field(default_factory=list)
 
 
 class AnalyticsResponse(BaseModel):

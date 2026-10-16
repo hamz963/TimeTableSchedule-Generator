@@ -1,4 +1,5 @@
 """FastAPI entry point."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -6,8 +7,13 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.middleware import RateLimitMiddleware
+
 from app.config import get_settings
-from app.routers import constraints, health, schedule, timetable, feedback, ml, views, export, chat, upload, teachers, auth
+from app.routers import (
+    constraints, health, schedule, timetable, feedback, ml, views, export, chat,
+    upload, teachers, auth, quality, events,
+)
 
 settings = get_settings()
 log = logging.getLogger("timetable.startup")
@@ -56,7 +62,26 @@ async def lifespan(app: FastAPI):
             db.close()
     except Exception as exc:  # pragma: no cover - environment dependent
         log.warning("admin seeding failed (%s)", exc)
+    # Bind the SSE broker to this loop so sync endpoints can publish to live
+    # subscribers via call_soon_threadsafe.
+    event_task = None
+    try:
+        from app.services.events import broker
+
+        broker.bind_loop(asyncio.get_running_loop())
+        # Relay events published by other replicas (no-op without Redis).
+        event_task = asyncio.create_task(broker.run_redis_subscriber())
+    except Exception as exc:  # pragma: no cover
+        log.warning("event broker startup failed (%s)", exc)
     yield
+    if event_task is not None:
+        event_task.cancel()
+        try:
+            await event_task
+        except asyncio.CancelledError:
+            pass  # expected: we just cancelled our own subscriber task
+        except Exception as exc:  # pragma: no cover - shutdown best effort
+            log.warning("event broker shutdown error (%s)", exc)
 
 
 app = FastAPI(
@@ -73,6 +98,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Per-IP throttling (raw ASGI; SSE-safe). Disabled when RATE_LIMIT_PER_MINUTE=0.
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(health.router)
 app.include_router(schedule.router)
@@ -86,6 +113,8 @@ app.include_router(chat.router)
 app.include_router(upload.router)
 app.include_router(teachers.router)
 app.include_router(auth.router)
+app.include_router(quality.router)
+app.include_router(events.router)
 
 
 @app.get("/", tags=["root"])

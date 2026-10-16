@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import LiveEvents from "@/components/LiveEvents";
 
 export const metadata: Metadata = {
   title: "Time Table Schedule Generator",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
         <Nav />
+        <LiveEvents />
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
       </body>
     </html>

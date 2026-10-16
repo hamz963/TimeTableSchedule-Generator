@@ -32,22 +32,13 @@ def model_stats(db: Session = Depends(get_db)):
 
 @router.post("/retrain", dependencies=[Depends(require_scheduler)])
 def retrain(db: Session = Depends(get_db)):
-    """Retrain synchronously (small data); use the Celery task for background."""
+    """Retrain the preference model synchronously on all feedback."""
     from app.ml.learner import train_model
 
     stats = train_model(db)
     if not stats.get("trained"):
         raise HTTPException(status_code=503, detail=stats.get("reason"))
     return {"status": "retrained", **stats}
-
-
-@router.post("/retrain-async", dependencies=[Depends(require_scheduler)])
-def retrain_async():
-    """Enqueue background retraining on the Celery worker."""
-    from app.tasks import retrain_model_task
-
-    job = retrain_model_task.delay()
-    return {"status": "retraining started in background", "task_id": job.id}
 
 
 @router.post("/suggest", dependencies=[Depends(get_current_user)])
