@@ -301,7 +301,7 @@ Grades: `excellent ≥90`, `good ≥75`, `fair ≥60`, `weak ≥40`, else `poor`
 
 ## Service & API surface
 
-- **33 REST paths / 36 operations / 15 modules** (OpenAPI-verified): `schedule`, `constraints`, `timetable`, `quality`, `events`, `views`, `export`, `upload`, `teachers`, `chat`, `feedback`, `ml`, `auth`, `health`.
+- **33 REST paths / 36 operations across 14 router modules** (OpenAPI-verified): `schedule`, `constraints`, `timetable`, `quality`, `events`, `views`, `export`, `upload`, `teachers`, `chat`, `feedback`, `ml`, `auth`, `health`.
 - **Auth & authorization**: JWT login, `admin` / `scheduler` / `viewer` roles, row-scoped access to runs.
 - **Data import**: CSV **and** Excel (`.xlsx`) upload with per-row validation errors and preview — an equivalence test proves uploaded data and typed table data produce a **byte-identical solver problem**.
 - **Edits & versioning**: manual session moves are re-verified against the rule set; rejected moves return the violated rule.
@@ -319,13 +319,14 @@ Grades: `excellent ≥90`, `good ≥75`, `fair ≥60`, `weak ≥40`, else `poor`
 | `/data` | CSV/Excel upload, validation report, preview |
 | `/schedule/[id]` | timetable grid, quality panel, manual drag-edit, export |
 | `/constraints` | create/toggle declarative rules with live validation |
-| `/quality` + `/analytics` | score breakdown, room utilisation, per-teacher load |
+| `/analytics` | score breakdown, room utilisation, per-teacher load |
 | `/benchmark` | run greedy-vs-optimized comparison from the UI |
 | `/chat` | AI assistant: explains the timetable, proposes rules |
 | `/teacher` | teacher profile & preferences |
+| `/login` | JWT sign-in and session handling |
 | `/health` | live component status (API, DB, Redis, solver, ML) |
 
-Production build: **14 routes**, 87.3 kB shared JS — a lightweight front-end for a heavy back-end.
+Production build: **13 pages (14 built routes)**, 87.3 kB shared JS — a lightweight front-end for a heavy back-end.
 
 ---
 
@@ -575,8 +576,6 @@ References: OR-Tools CP-SAT documentation · Python-SAT/CP timetabling literatur
 
 ---
 
----
-
 # Appendix
 
 ---
@@ -588,14 +587,14 @@ backend/app/engine/      context, heuristic, exact, optimizer, rules,
                          objectives, constraints, metrics, pipeline
 backend/app/services/    planner, solver facade, edits, views, exporter,
                          validator, analytics, teachers, chat, chat_store,
-                         events, mail-free notifications
-backend/app/routers/     15 modules: schedule, quality, constraints, events,
+                         ai_provider, events
+backend/app/routers/     14 modules: schedule, quality, constraints, events,
                          timetable, feedback, ml, views, export, chat, upload,
                          teachers, auth, health
 backend/app/ml/          features, learner (RandomForest), predictor
 backend/app/middleware.py per-IP rate limiting (raw ASGI, SSE-safe)
-backend/tests/           24 files, 131 tests
-frontend/                14 routes, components + hooks
+backend/tests/           23 files, 131 tests
+frontend/                13 pages, components + hooks
 frontend/hooks/          useSchedule, useConstraints, useFeedback, useML
   docker-compose.yml     Postgres 16 · Redis 7 · API · dashboard
 ```
@@ -632,6 +631,6 @@ curl -X POST localhost:8000/quality/benchmark \
   -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
   -d '{"n_faculty":50,"n_rooms":20,"n_courses":100,"n_slots":40,"optimize_seconds":1.0,"seed":12345}'
 
-# 4. front-end production build (14 routes, 87.3 kB shared JS)
+# 4. front-end production build (13 pages / 14 built routes, 87.3 kB shared JS)
 cd frontend && npx next build
 ```

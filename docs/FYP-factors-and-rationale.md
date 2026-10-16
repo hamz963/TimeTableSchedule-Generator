@@ -128,7 +128,7 @@ happen.
 | Factor | Status in this project |
 |---|---|
 | Feasibility (technical) | Runs from `docker compose up`; pure-Python + Node; no special hardware |
-| Complexity / difficulty | Two solvers, rule registry, 15 API modules, 14 UI routes, ML loop |
+| Complexity / difficulty | Two solvers, rule registry, 14 backend router modules, 13 dashboard pages, ML loop |
 | Scalability | Measured: 200 faculty / 400 courses in 3.63 s, 0 violations; 64 concurrent solves |
 | Correctness guarantee | Independent auditor; 131 tests; equivalence tests (upload ↔ typed input) |
 | Performance evidence | Optimizer +5.2 %/+7.8 % cost, quality 72.0 → 74.2; API p95 1.45 s |
@@ -216,7 +216,7 @@ happen.
 - [ ] `cd backend && .venv/bin/python -m pytest tests/ -q` → `131 passed` (screenshot it).
 - [ ] `pytest tests/test_soak.py -s -q` output captured for the results chapter.
 - [ ] Benchmark JSON saved (`/quality/benchmark` with seed 12345).
-- [ ] `npx next build` output captured (14 routes, 87.3 kB shared JS).
+- [ ] `npx next build` output captured (13 pages / 14 built routes, 87.3 kB shared JS).
 - [ ] Repository pushed and public/accessible to the examiner if required.
 
 **Delivery**

@@ -172,10 +172,10 @@ the &quot;why&quot; of the project</aside></section>
 <p>Grades: <code>excellent ≥90</code>, <code>good ≥75</code>, <code>fair ≥60</code>, <code>weak ≥40</code>, else <code>poor</code>.</p>
 <p><code>GET /quality/{run_id}</code> returns the score, sub-scores, per-teacher workload/notes and <strong>plain-language reasons</strong> ("34/41 sessions landed in a teacher-preferred slot"). The score is computed from the <em>same</em> objective definitions the optimizer minimises, so score and search can't drift apart.</p></section>
 <section class="slide"><h2>Service &amp; API surface</h2>
-<ul><li><strong>33 REST paths / 36 operations / 15 modules</strong> (OpenAPI-verified): <code>schedule</code>, <code>constraints</code>, <code>timetable</code>, <code>quality</code>, <code>events</code>, <code>views</code>, <code>export</code>, <code>upload</code>, <code>teachers</code>, <code>chat</code>, <code>feedback</code>, <code>ml</code>, <code>auth</code>, <code>health</code>.</li><li><strong>Auth &amp; authorization</strong>: JWT login, <code>admin</code> / <code>scheduler</code> / <code>viewer</code> roles, row-scoped access to runs.</li><li><strong>Data import</strong>: CSV <strong>and</strong> Excel (<code>.xlsx</code>) upload with per-row validation errors and preview — an equivalence test proves uploaded data and typed table data produce a <strong>byte-identical solver problem</strong>.</li><li><strong>Edits &amp; versioning</strong>: manual session moves are re-verified against the rule set; rejected moves return the violated rule.</li><li><strong>Export</strong>: CSV/ICS/printable views; saved view configurations.</li><li><strong>Rate limiting</strong>: pure-ASGI per-IP token bucket (SSE-safe), configurable, disabled in tests.</li><li><strong>Real-time</strong>: SSE progress + completion events; <code>GET /events/recent</code> for backfill.</li></ul></section>
+<ul><li><strong>33 REST paths / 36 operations across 14 router modules</strong> (OpenAPI-verified): <code>schedule</code>, <code>constraints</code>, <code>timetable</code>, <code>quality</code>, <code>events</code>, <code>views</code>, <code>export</code>, <code>upload</code>, <code>teachers</code>, <code>chat</code>, <code>feedback</code>, <code>ml</code>, <code>auth</code>, <code>health</code>.</li><li><strong>Auth &amp; authorization</strong>: JWT login, <code>admin</code> / <code>scheduler</code> / <code>viewer</code> roles, row-scoped access to runs.</li><li><strong>Data import</strong>: CSV <strong>and</strong> Excel (<code>.xlsx</code>) upload with per-row validation errors and preview — an equivalence test proves uploaded data and typed table data produce a <strong>byte-identical solver problem</strong>.</li><li><strong>Edits &amp; versioning</strong>: manual session moves are re-verified against the rule set; rejected moves return the violated rule.</li><li><strong>Export</strong>: CSV/ICS/printable views; saved view configurations.</li><li><strong>Rate limiting</strong>: pure-ASGI per-IP token bucket (SSE-safe), configurable, disabled in tests.</li><li><strong>Real-time</strong>: SSE progress + completion events; <code>GET /events/recent</code> for backfill.</li></ul></section>
 <section class="slide"><h2>Dashboard (Next.js 14)</h2>
-<table><thead><tr><th>Page</th><th>Purpose</th></tr></thead><tbody><tr><td><code>/schedule/easy</code></td><td>guided builder: teachers, courses, rooms, days, breaks</td></tr><tr><td><code>/data</code></td><td>CSV/Excel upload, validation report, preview</td></tr><tr><td><code>/schedule/[id]</code></td><td>timetable grid, quality panel, manual drag-edit, export</td></tr><tr><td><code>/constraints</code></td><td>create/toggle declarative rules with live validation</td></tr><tr><td><code>/quality</code> + <code>/analytics</code></td><td>score breakdown, room utilisation, per-teacher load</td></tr><tr><td><code>/benchmark</code></td><td>run greedy-vs-optimized comparison from the UI</td></tr><tr><td><code>/chat</code></td><td>AI assistant: explains the timetable, proposes rules</td></tr><tr><td><code>/teacher</code></td><td>teacher profile &amp; preferences</td></tr><tr><td><code>/health</code></td><td>live component status (API, DB, Redis, solver, ML)</td></tr></tbody></table>
-<p>Production build: <strong>14 routes</strong>, 87.3 kB shared JS — a lightweight front-end for a heavy back-end.</p></section>
+<table><thead><tr><th>Page</th><th>Purpose</th></tr></thead><tbody><tr><td><code>/schedule/easy</code></td><td>guided builder: teachers, courses, rooms, days, breaks</td></tr><tr><td><code>/data</code></td><td>CSV/Excel upload, validation report, preview</td></tr><tr><td><code>/schedule/[id]</code></td><td>timetable grid, quality panel, manual drag-edit, export</td></tr><tr><td><code>/constraints</code></td><td>create/toggle declarative rules with live validation</td></tr><tr><td><code>/analytics</code></td><td>score breakdown, room utilisation, per-teacher load</td></tr><tr><td><code>/benchmark</code></td><td>run greedy-vs-optimized comparison from the UI</td></tr><tr><td><code>/chat</code></td><td>AI assistant: explains the timetable, proposes rules</td></tr><tr><td><code>/teacher</code></td><td>teacher profile &amp; preferences</td></tr><tr><td><code>/login</code></td><td>JWT sign-in and session handling</td></tr><tr><td><code>/health</code></td><td>live component status (API, DB, Redis, solver, ML)</td></tr></tbody></table>
+<p>Production build: <strong>13 pages (14 built routes)</strong>, 87.3 kB shared JS — a lightweight front-end for a heavy back-end.</p></section>
 <section class="slide"><h2>ML &amp; AI components</h2>
 <p><strong>Preference learning (supervised)</strong></p>
 <ul><li>Feedback (accept/reject + reason) on generated timetables → feature extraction → <strong>RandomForest</strong> classifier + scaler persisted with a version, sample count and accuracy.</li><li><code>POST /ml/retrain</code> trains synchronously and records the evaluation; <code>POST /ml/suggest</code> returns suggested preferred time-of-day and candidate slot ids for a teacher's load.</li><li>Honest caveat surfaced on the dashboard: with little feedback, reported accuracy is close to memorization — the loop is designed to improve as real feedback accumulates.</li></ul>
@@ -238,14 +238,14 @@ the &quot;why&quot; of the project</aside></section>
                          objectives, constraints, metrics, pipeline
 backend/app/services/    planner, solver facade, edits, views, exporter,
                          validator, analytics, teachers, chat, chat_store,
-                         events, mail-free notifications
-backend/app/routers/     15 modules: schedule, quality, constraints, events,
+                         ai_provider, events
+backend/app/routers/     14 modules: schedule, quality, constraints, events,
                          timetable, feedback, ml, views, export, chat, upload,
                          teachers, auth, health
 backend/app/ml/          features, learner (RandomForest), predictor
 backend/app/middleware.py per-IP rate limiting (raw ASGI, SSE-safe)
-backend/tests/           24 files, 131 tests
-frontend/                14 routes, components + hooks
+backend/tests/           23 files, 131 tests
+frontend/                13 pages, components + hooks
 frontend/hooks/          useSchedule, useConstraints, useFeedback, useML
   docker-compose.yml     Postgres 16 · Redis 7 · API · dashboard</code></pre></section>
 <section class="slide"><h2>B — Configuration &amp; tuning knobs</h2>
@@ -262,7 +262,7 @@ curl -X POST localhost:8000/quality/benchmark \
   -H &#x27;Authorization: Bearer &lt;token&gt;&#x27; -H &#x27;Content-Type: application/json&#x27; \
   -d &#x27;{&quot;n_faculty&quot;:50,&quot;n_rooms&quot;:20,&quot;n_courses&quot;:100,&quot;n_slots&quot;:40,&quot;optimize_seconds&quot;:1.0,&quot;seed&quot;:12345}&#x27;
 
-# 4. front-end production build (14 routes, 87.3 kB shared JS)
+# 4. front-end production build (13 pages / 14 built routes, 87.3 kB shared JS)
 cd frontend &amp;&amp; npx next build</code></pre></section>
 </div>
 <div class="hud"><button onclick="document.body.classList.toggle('show-notes')">notes (n)</button><button onclick="window.print()">print / PDF</button><span id="counter">1 / 50</span></div>
