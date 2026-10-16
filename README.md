@@ -237,10 +237,10 @@ solver/planner/API/edit/chat/export suite, request-size caps, and a
 |---|---|
 | Small instances | optimal (CP-SAT), <0.5 s |
 | 50 faculty / 20 rooms / 100 courses, 40 slots | feasible, **no hard violations**, greedy+descent+SA within the budget |
-| Optimizer vs. greedy | **+2% (0.3 s) → +8% (1.5 s)**; the returned timetable **never** scores lower than greedy nor costs more |
-| Soak: 200 faculty / 40 rooms / 400 courses / 60 slots | feasible, 400/400 scheduled, **0 hard violations**, ~4.3 s wall |
-| Soak: 64 concurrent 100-course solves | all feasible, median engine time ~4.6 s |
-| Soak: 80 sequential API generations | p50 ~1.2 s, p95 ~1.5 s |
+| Optimizer vs. greedy | **+5.2% cost (1 s) → +7.8% cost (3 s)** on a 50/20/100/40 instance (quality 72.0 → 73.2 → 74.2); the returned timetable **never** scores lower than greedy nor costs more |
+| Soak: 200 faculty / 40 rooms / 400 courses / 60 slots | feasible, 400/400 scheduled, **0 hard violations**, ~3.6 s wall |
+| Soak: 64 concurrent 100-course solves | 64/64 feasible, median engine time ~4.8 s |
+| Soak: 80 sequential API generations | p50 ~1.23 s, p95 ~1.45 s, max ~1.71 s |
 
 The optimizer reports a `converged` flag (true when the last quarter of the
 search found no further improvement) and the best quality score it reached —
