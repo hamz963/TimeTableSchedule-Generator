@@ -219,12 +219,18 @@ curl -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
 ## Testing
 
 ```bash
-cd backend && pytest tests/ -q      # 133 tests (~2.5 min incl. the soak test)
+cd backend && pytest tests/ -q      # 137 tests (~2.5 min incl. the soak test)
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same suite, a migration
-`upgrade head → downgrade base → upgrade head` cycle from an empty database,
-and the frontend type-check + production build on every push and pull request.
+```bash
+cd frontend && npm run lint && npm test && npm run build   # 11 UI/API tests
+cd backend && python scripts/feasibility_fuzz.py           # independent feasibility oracle
+```
+
+CI (`.github/workflows/ci.yml`) runs the backend suite, a migration
+`upgrade head → downgrade base → upgrade head` cycle from an empty database, a
+feasibility-fuzz smoke run, and the frontend lint + tests + production build on
+every push and pull request.
 
 Coverage includes: engine context/heuristic/optimizer/metrics/pipeline,
 declarative rules (registry, name resolution, rebasing, end-to-end enforcement,
@@ -245,6 +251,12 @@ solver/planner/API/edit/chat/export suite, request-size caps, and a
 | Soak: 200 faculty / 40 rooms / 400 courses / 60 slots | feasible, 400/400 scheduled, **0 hard violations**, ~3.6 s wall |
 | Soak: 64 concurrent 100-course solves | 64/64 feasible, median engine time ~4.8 s |
 | Soak: 80 sequential API generations | p50 ~1.23 s, p95 ~1.45 s, max ~1.71 s |
+| **Realistic instance** (mixed 60/90/120-min sessions, cohorts, labs, 5-day grid) | 1 200 sessions in **3.67 s**, 1 200/1 200 scheduled, quality 81.2, **0 hard violations**; 2 000 sessions in 7.77 s |
+
+`docs/perf-realistic.md` documents the realistic-instance benchmark
+(`backend/scripts/bench_realistic.py`): it is university-shaped — cohorts that
+cannot clash, lab equipment, 90/120-minute blocks — rather than the uniform
+grid used for optimizer comparisons.
 
 The optimizer reports a `converged` flag (true when the last quarter of the
 search found no further improvement) and the best quality score it reached —
@@ -272,9 +284,13 @@ curl -X POST localhost:8000/quality/benchmark -H "Authorization: Bearer <token>"
 - `backend/app/middleware.py` — per-IP rate limiting (raw ASGI, SSE-safe)
 - `backend/app/services/chat_store.py` — Redis-backed chat state (memory fallback)
 - `backend/app/ml/` — preference learning (RandomForest)
-- `backend/tests/` — 133 tests
+- `backend/tests/` — 137 tests
+- `backend/scripts/` — `feasibility_fuzz.py` (independent DFS oracle) and
+  `bench_realistic.py` (university-shaped benchmark)
+- `frontend/test/` — Vitest + Testing Library suite (11 tests)
 - `docs/` — `FYP-defense-deck.md` (+ rendered `FYP-defense-deck.html`,
-  rebuilt by `python docs/build_deck.py`) and `FYP-factors-and-rationale.md`
+  rebuilt by `python docs/build_deck.py`), `FYP-factors-and-rationale.md` and
+  `perf-realistic.md`
 - `frontend/` — Next.js dashboard (builder, grid, quality panel, view renderer,
   benchmark, live events)
 
@@ -282,26 +298,41 @@ curl -X POST localhost:8000/quality/benchmark -H "Authorization: Bearer <token>"
 
 ## Production readiness — honest status
 
-Verified in this overhaul: **133-test suite green** · engine refactor is
-behaviour-preserving (original 100 tests pass unchanged) · frontend builds
-(Next.js 14.2) · live HTTP smoke test (generate with a rule → quality report →
-benchmark → events) passes against a real server · Redis-backed chat state and
-cross-replica event delivery verified against a live Redis instance.
+Verified: **backend suite green** · **frontend lint + 11 tests + production
+build green** · the full `docker compose up --build` stack (Postgres + Redis +
+API + dashboard) boots healthy and serves a generated timetable · migrations
+`upgrade → downgrade → upgrade` on both SQLite and Postgres with no schema
+drift · an independent DFS oracle agrees with the solver's feasibility verdict
+on 263 random rule-heavy instances · `pip-audit` reports **no known vulnerable
+Python dependencies**.
 
 Known limits (not yet done, in priority order):
 
-1. **Single-worker assumptions (partly resolved).** Chat conversations and the
+1. **Next.js 14.2 carries published advisories.** `npm audit --omit=dev` flags
+   next 14.2.35 (DoS, cache poisoning, SSRF in server actions). The fix is a
+   major migration to Next 15.5.24+/16 (React 19, async route params, `next lint`
+   removed), so it is deliberately not done blind here — the 11 frontend tests
+   and the production build exist to make that migration safe. Until then, do
+   not expose the dashboard directly to the internet without a reverse proxy
+   (rate limiting, request-size caps and auth still apply at the API).
+
+2. **Single-worker assumptions (partly resolved).** Chat conversations and the
 event broker now use Redis with a graceful in-memory fallback, so replicas
 share state when `REDIS_URL` is set. ML models still live on local disk — mount
 a shared volume or pin training to one replica.
-2. **Optimizer is a metaheuristic, not a proof of optimality.** On large
+3. **Optimizer is a metaheuristic, not a proof of optimality.** On large
 instances it returns *improved feasible* solutions (honest), not provably
 optimal ones. The result carries a `converged` flag and the best score reached.
 Deterministic mode (`max_iterations`) exists for reproducibility.
-3. **Load testing is starter-level.** `tests/test_soak.py` covers a 200-faculty
-solve, 64 concurrent solves and an 80-request API latency distribution; the
-1,000-user criterion is still projection, not a measured result.
-4. **ML is a starter loop.** Accuracy on tiny datasets is memorization; treat
+4. **Load testing is starter-level.** `tests/test_soak.py` covers a
+200-faculty solve, 64 concurrent in-process solves and an 80-request API latency
+distribution; the 1,000-user criterion is still projection, not a measured
+result. The realistic benchmark (`docs/perf-realistic.md`) shows the request
+budget holds to ~1 200 sessions (3.67 s) and is exceeded at 2 000 (7.77 s).
+5. **No multi-room or multi-term sessions.** Each session occupies exactly one
+slot and one room; labs are modelled as one 90/120-minute block, not as a pair
+of linked rooms or a recurring series across a term.
+6. **ML is a starter loop.** Accuracy on tiny datasets is memorization; treat
 `model_accuracy` accordingly until real feedback volume arrives.
-5. **Events are best-effort.** `publish` never breaks a request; a dropped
+7. **Events are best-effort.** `publish` never breaks a request; a dropped
 subscriber simply misses the event (poll `/events/recent` for backfill).

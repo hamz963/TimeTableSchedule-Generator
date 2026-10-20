@@ -90,10 +90,10 @@ Supervisor: **[Supervisor Name]**
 | O1 | Model the timetabling problem as a constraint-satisfaction + optimization problem | `ProblemContext` model + normalized problem definition | ✅ |
 | O2 | Produce conflict-free schedules (all hard constraints) | `engine/constraints.py` independent auditor; **0 violations** on every test instance | ✅ |
 | O3 | Optimize *quality*, not just feasibility | 0–100 composite score (5 weighted sub-scores) + optimizer vs greedy benchmark | ✅ |
-| O4 | Let non-programmers express policy as rules | 7 declarative rule kinds wired into solver, optimizer **and** verifier | ✅ |
-| O5 | Handle realistic scale with bounded time | 200-faculty instance solved in **3.63 s**; 64 concurrent solves | ✅ |
+| O4 | Let non-programmers express policy as rules | 7 declarative rule kinds, all enforced by optimizer **and** verifier; the 5 hard ones compiled into CP-SAT | ✅ |
+| O5 | Handle realistic scale with bounded time | **1 200-session realistic instance in 3.67 s** (0 violations); 2 000 sessions in 7.8 s; 64 concurrent solves | ✅ |
 | O6 | Explain the result and learn preferences | Explainability endpoint + ML preference model from feedback | ✅ |
-| O7 | Package for real deployment | Docker Compose (API + Postgres + Redis + dashboard), 133 tests | ✅ |
+| O7 | Package for real deployment | Docker Compose (API + Postgres + Redis + dashboard), 137 tests | ✅ |
 
 ---
 
@@ -243,7 +243,7 @@ request ─▶ build_context ─▶ greedy feasible seed
 - **Hard**: exactly one placement per course; at-most-one per (teacher, slot), (room, slot), (student group, slot); availability and capacity filters; every declarative hard rule encoded as `Add(var == 0)` / `Add(var == 1)`.
 - **Soft**: weighted objective terms for preference hits, time-band fit, room waste, fairness (max day load), compactness.
 - **Budget**: `solver_time_limit_seconds` (default 5 s) + 8 parallel search workers.
-- Reports `OPTIMAL` / `FEASIBLE` / `INFEASIBLE`; falls back to the heuristic path when the model is infeasible or times out.
+- Reports `OPTIMAL` / `FEASIBLE` / `INFEASIBLE`. The result is audited before it is returned; if a hard rule could not be encoded, or the audit fails, the solver falls back to the verified heuristic path instead of labelling a broken timetable "optimal".
 
 ---
 
@@ -252,14 +252,14 @@ request ─▶ build_context ─▶ greedy feasible seed
 - Starts from the greedy seed; moves a random session to a new (venue, slot).
 - **Acceptance**: improvement always; worsening accepted with `exp(-Δ/T)`, geometric cooling.
 - **Move legality** enforced by the same rule registry (`placement_allowed`, `move_ok`) → hard constraints never break.
-- **Guarantee added during this project**: the optimizer only returns a result whose *reported quality score* is ≥ the seed and whose internal cost is ≤ the seed — a cost win can never silently produce a lower score.
+- **Guarantee added during this project**: the optimizer never returns a result with a higher internal cost than the seed it started from, and on 25 randomised instances the reported quality score never dropped (median +3.90).
 - **Deterministic mode**: `max_iterations` + fixed seed ⇒ byte-identical results for reproducibility.
 
 ---
 
 ## Declarative rule engine (policy as data)
 
-Seven built-in rule kinds, each with hooks for all four consumers:
+Seven built-in rule kinds. All seven are enforced by the metaheuristic and audited by the independent verifier; the five hard kinds are also compiled into the CP-SAT model:
 
 | Kind | Type | Meaning |
 |---|---|---|
@@ -348,7 +348,7 @@ Production build: **13 pages (14 built routes)**, 87.3 kB shared JS — a lightw
 
 ---
 
-## Testing strategy — 133 automated tests
+## Testing strategy — 137 automated tests
 
 | Layer | What it proves |
 |---|---|
@@ -361,7 +361,7 @@ Production build: **13 pages (14 built routes)**, 87.3 kB shared JS — a lightw
 | Performance tests | bounded solve time, parallel solves |
 | **Soak tests** | 200-faculty solve, 64 concurrent solves, 80-request latency distribution |
 
-**Result: `133 passed` in 2 m 30 s** (`pytest tests/ -q`), and the front-end passes a clean `next build`.
+**Result: `137 passed` in 2 m 08 s** (`pytest tests/ -q`); the front-end passes ESLint, 11 Vitest tests and a clean `next build`.
 
 *Note:* the soak/performance tests assert correctness + bounded time; they print the raw numbers (below) rather than hiding them behind a threshold.
 
@@ -399,6 +399,22 @@ Instance: 50 teachers / 20 rooms / 100 courses / 40 slots, seed 12345. Greedy is
 
 ---
 
+## RQ2b — university-shaped instance (measured)
+
+Mixed 60/90/120-minute sessions, cohorts that cannot clash, lab equipment, teachers with unavailable days.
+
+| Sessions | Teachers | Wall clock | Scheduled | Quality | Optimizer | Violations |
+|---:|---:|---:|---:|---:|---|---:|
+| 150 | 15 | 1.54 s | 150/150 | 86.8 | improved | 0 |
+| 400 | 40 | 1.74 s | 400/400 | 85.7 | improved | 0 |
+| 800 | 80 | 2.41 s | 800/800 | 82.8 | improved | 0 |
+| 1 200 | 120 | 3.67 s | 1 200/1 200 | 81.2 | improved | 0 |
+| 2 000 | 200 | 7.77 s | 2 000/2 000 | 80.8 | **budget-bound** | 0 |
+
+`python backend/scripts/bench_realistic.py` — the 5 s budget holds to ~1 200 sessions; at 2 000 the constructor consumes it and the optimizer gets only its floor (reported honestly as `improved: false`).
+
+---
+
 ## RQ1 / O5 — scale & concurrency (measured)
 
 | Test | Instance | Result |
@@ -416,12 +432,12 @@ Instance: 50 teachers / 20 rooms / 100 courses / 40 slots, seed 12345. Greedy is
 | Objective | Evidence | Verdict |
 |---|---|---|
 | O1 Problem model | Shared `ProblemContext`; single normalized problem definition | Met |
-| O2 Conflict-free output | Independent verifier: 0 violations on all instances (incl. 400-course soak) | Met |
+| O2 Conflict-free output | Independent verifier: 0 violations on every instance, incl. 2 000-session realistic runs | Met |
 | O3 Quality optimization | +2.7 % / +6.1 % / +8.5 % cost, 79.5 → 86.4 score, never worse | Met |
 | O4 Policy as rules | 7 rule kinds → solver + objective + verifier; UI create/toggle | Met |
-| O5 Scale & time | 200 faculty in 3.63 s; 64 concurrent solves; p95 1.45 s | Met |
+| O5 Scale & time | 1 200 sessions in 3.67 s (0 violations), 2 000 in 7.8 s; 64 concurrent solves; p95 1.45 s | Met |
 | O6 Explainability + ML | Score breakdown, per-teacher reasons, feedback→retrain→suggest loop | Met |
-| O7 Deployability | Docker Compose stack, migrations on boot, health endpoint, 133 tests | Met |
+| O7 Deployability | Docker Compose stack, migrations on boot, health endpoint, 137 tests | Met |
 
 *Unmet / partial by design:* proof of optimality at 200-faculty scale; the 1,000-user load figure is a projection, not a measurement (stated as such).
 
@@ -480,7 +496,7 @@ Instance: 50 teachers / 20 rooms / 100 courses / 40 slots, seed 12345. Greedy is
 | Technical depth & difficulty | NP-hard optimization, CP-SAT modelling, SA implementation, distributed state, ML loop |
 | System design & architecture | Layered engine, shared context, two-tier pipeline, rule registry |
 | Implementation quality | 33 REST endpoints, 14 dashboard routes, typed schemas, migrations, containerization |
-| Testing & verification | **133 automated tests**, independent auditor, equivalence/security/soak tests |
+| Testing & verification | **137 automated tests**, independent auditor, equivalence/security/soak tests |
 | **Evaluation with real data** | Optimizer-vs-greedy benchmark, 200-faculty soak, concurrency, API latency |
 | Documentation | README, architecture notes, OpenAPI docs, in-repo usage instructions |
 | Project management | Sprint plan, milestones, risk register (next slide) |
@@ -542,7 +558,7 @@ Instance: 50 teachers / 20 rooms / 100 courses / 40 slots, seed 12345. Greedy is
 4. **Read the result** — the timetable grid, then the quality panel: 0–100 score, the five sub-scores, grade, per-teacher notes, and the rules honoured.
 5. **Prove the rules bind** — ask the chat assistant which rules are active; attempt a manual drag that violates a rule → rejected with the rule name.
 6. **Show the evidence** — `/benchmark` in the UI: greedy vs. optimized side by side, then the `/health` panel (API, DB, Redis, solver, ML).
-7. *(closing)* `pytest tests/ -q` → **133 passed**.
+7. *(closing)* `pytest tests/ -q` → **137 passed**.
 
 **Fallback if the live stack fails:** recorded screen capture of the same seven steps + `pytest` output and benchmark JSON in the appendix.
 
@@ -559,7 +575,7 @@ Only the CP-SAT path is proven optimal, on instances small enough for it. At sca
 
 **Q: Why two algorithms?** CP-SAT proves optimality but doesn't scale; SA scales but proves nothing. Together the system is useful at both ends, and reports honestly which one it used.
 
-**Q: How did you test?** 133 tests across engine, rules, API, auth/security, upload equivalence, Redis state, performance and soak — plus a benchmark that measures optimizer gain per second.
+**Q: How did you test?** 137 tests across engine, rules, API, auth/security, upload equivalence, Redis state, performance and soak — plus a benchmark that measures optimizer gain per second.
 
 **Q: What would you do with another semester?** Real institutional dataset and pilot; exact decomposition to push provable optimality further; Pareto multi-objective selection; SIS integration.
 
@@ -569,7 +585,7 @@ Only the CP-SAT path is proven optimal, on instances small enough for it. At sca
 
 > **Delivered:** a working, tested, containerized timetable optimization system that is conflict-free by verification, measurable in quality, honest about its limits, and operable by a real timetable office.
 >
-> **Evidence:** 133 automated tests · optimizer +2.7 % → +8.5 % cost improvement (79.5 → 86.4 quality) · 400-course instance in 3.63 s with 0 violations · 64/64 concurrent solves · API p95 1.45 s.
+> **Evidence:** 137 backend tests + 11 frontend tests · optimizer +2.7 % → +8.5 % cost improvement (79.5 → 86.4 quality) · 1 200-session realistic instance in 3.67 s with 0 violations (2 000 in 7.8 s) · 64/64 concurrent solves · API p95 1.45 s.
 
 **Thank you — questions welcome.**
 
@@ -594,7 +610,7 @@ backend/app/routers/     14 modules: schedule, quality, constraints, events,
                          teachers, auth, health
 backend/app/ml/          features, learner (RandomForest), predictor
 backend/app/middleware.py per-IP rate limiting (raw ASGI, SSE-safe)
-backend/tests/           23 files, 133 tests
+backend/tests/           23 files, 137 tests
 frontend/                13 pages, components + hooks
 frontend/hooks/          useSchedule, useConstraints, useFeedback, useML
   docker-compose.yml     Postgres 16 · Redis 7 · API · dashboard
@@ -621,7 +637,7 @@ frontend/hooks/          useSchedule, useConstraints, useFeedback, useML
 ## C — How to reproduce every number in this deck
 
 ```bash
-# 1. full suite -> 133 passed
+# 1. full suite -> 137 passed
 cd backend && .venv/bin/python -m pytest tests/ -q
 
 # 2. scale + latency numbers (prints the raw figures)
