@@ -1,6 +1,7 @@
 """Declarative rules: registry, resolution, rebasing and end-to-end enforcement."""
 import pytest
 
+from app.engine.constraints import verify
 from app.engine.context import build_context
 from app.engine.heuristic import greedy_assign
 from app.engine.rules import build_rules, make_rule, rule_catalog
@@ -66,6 +67,43 @@ def test_course_before_enforced_end_to_end():
                 and p["summary"]["course_labels"][str(k)] == "Math")
     art = next(v for k, v in by_course.items() if p["summary"]["course_labels"].get(str(k)) == "Art")
     assert math < art
+
+
+def test_course_before_combined_with_forbid_slot_stays_feasible():
+    """Regression: greedy placed the dependent course first and gave up.
+
+    ``course_before`` + ``forbid_slot`` used to be reported infeasible on a
+    trivially satisfiable instance, because the constructive heuristic sorted
+    purely by candidate count and could schedule ``Art`` before ``Math`` -- so
+    the prerequisite could never precede it. The build order now follows the
+    precedence ranking.
+    """
+    p = build_problem(_problem(
+        courses=[
+            {"name": "Math", "teacher": "Alice", "credit_hours": 3},
+            {"name": "Art", "teacher": "Bob", "credit_hours": 1},
+        ],
+        rules=[
+            {"kind": "course_before", "params": {"course_a": "Math", "course_b": "Art"}},
+            {"kind": "forbid_slot",
+             "params": {"entity": "faculty", "id": "Bob", "days": ["Fri"]}},
+        ],
+    ))
+    rules = build_rules(p["rules"])
+    result = TimetableSolver.generate(
+        p["faculty"], p["venues"], p["slots"], p["courses"],
+        time_limit_seconds=5, session_groups=p["session_groups"], rules=rules,
+    )
+    assert result.status in ("optimal", "feasible")
+    assert len(result.assignments) == 4
+    ctx = build_context(p["faculty"], p["venues"], p["slots"], p["courses"],
+                        session_groups=p["session_groups"], rules=rules)
+    assert verify(result.assignments, p["courses"], p["faculty"], p["venues"],
+                  p["slots"], p["session_groups"], ctx=ctx) == []
+    days = {s["id"]: s["day_of_week"] for s in p["slots"]}
+    labels = p["summary"]["course_labels"]
+    art_slots = [a["slot_id"] for a in result.assignments if labels[str(a["course_id"])] == "Art"]
+    assert art_slots and all(days[sid] != "Fri" for sid in art_slots)
 
 
 def test_no_same_day_enforced_end_to_end():

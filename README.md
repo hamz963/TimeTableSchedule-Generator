@@ -219,8 +219,12 @@ curl -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
 ## Testing
 
 ```bash
-cd backend && pytest tests/ -q      # 131 tests (~2.5 min incl. the soak test)
+cd backend && pytest tests/ -q      # 132 tests (~2.5 min incl. the soak test)
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same suite, a migration
+`upgrade head → downgrade base → upgrade head` cycle from an empty database,
+and the frontend type-check + production build on every push and pull request.
 
 Coverage includes: engine context/heuristic/optimizer/metrics/pipeline,
 declarative rules (registry, name resolution, rebasing, end-to-end enforcement,
@@ -268,7 +272,7 @@ curl -X POST localhost:8000/quality/benchmark -H "Authorization: Bearer <token>"
 - `backend/app/middleware.py` — per-IP rate limiting (raw ASGI, SSE-safe)
 - `backend/app/services/chat_store.py` — Redis-backed chat state (memory fallback)
 - `backend/app/ml/` — preference learning (RandomForest)
-- `backend/tests/` — 131 tests
+- `backend/tests/` — 132 tests
 - `docs/` — `FYP-defense-deck.md` (+ rendered `FYP-defense-deck.html`,
   rebuilt by `python docs/build_deck.py`) and `FYP-factors-and-rationale.md`
 - `frontend/` — Next.js dashboard (builder, grid, quality panel, view renderer,
@@ -278,7 +282,7 @@ curl -X POST localhost:8000/quality/benchmark -H "Authorization: Bearer <token>"
 
 ## Production readiness — honest status
 
-Verified in this overhaul: **131-test suite green** · engine refactor is
+Verified in this overhaul: **132-test suite green** · engine refactor is
 behaviour-preserving (original 100 tests pass unchanged) · frontend builds
 (Next.js 14.2) · live HTTP smoke test (generate with a rule → quality report →
 benchmark → events) passes against a real server · Redis-backed chat state and

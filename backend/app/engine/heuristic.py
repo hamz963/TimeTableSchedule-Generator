@@ -17,6 +17,36 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.engine.context import ProblemContext, Placement
 
 
+def _rule_order_ranks(ctx: ProblemContext) -> Dict[int, int]:
+    """Rank sessions by the ``course_before`` rules (A must come before B).
+
+    Greedy is order-sensitive: a session placed early takes the earliest slot,
+    so if the *dependent* course (B) is placed first its prerequisite (A) can
+    never be scheduled before it and the whole construction fails, even though
+    a solution exists. Ranking by longest precedence path keeps the build in a
+    rule-consistent order. Cycles are tolerated (ranking just refuses to stop
+    relaxing) because the verifier still rejects any real violation.
+    """
+    edges: List[Tuple[int, int]] = []
+    for rule in ctx.rules:
+        if getattr(rule, "kind", "") != "course_before" or not getattr(rule, "hard", True):
+            continue
+        for a in getattr(rule, "a", ()) or ():
+            for b in getattr(rule, "b", ()) or ():
+                edges.append((int(a), int(b)))
+    ranks: Dict[int, int] = {}
+    for _ in range(len(edges) + 1):
+        changed = False
+        for a, b in edges:
+            want = ranks.get(a, 0) + 1
+            if ranks.get(b, 0) < want:
+                ranks[b] = want
+                changed = True
+        if not changed:
+            break
+    return ranks
+
+
 def greedy_assign(
     ctx: ProblemContext, enforce_rules: bool = True
 ) -> Optional[List[Dict[str, int]]]:
@@ -152,8 +182,9 @@ def greedy_assign(
         return sorted(cands, key=sort_key)
 
     rest = [c for c in courses if c["id"] not in locked_ids]
+    ranks = _rule_order_ranks(ctx)
     with_counts = [(c, candidates(c)) for c in rest]
-    with_counts.sort(key=lambda t: (len(t[1]), t[0]["id"]))
+    with_counts.sort(key=lambda t: (ranks.get(t[0]["id"], 0), len(t[1]), t[0]["id"]))
 
     # Track placements so relational rules (course_before, same_day, ...) can gate.
     placement: Dict[int, Tuple[int, int]] = {
