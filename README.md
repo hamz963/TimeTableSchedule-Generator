@@ -170,7 +170,7 @@ set `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` in production.
 ```bash
 # backend
 cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
-# frontend
+# frontend (Node 22+; jsdom 30 requires it for the test suite)
 cd frontend && npm install && npm run dev
 ```
 
