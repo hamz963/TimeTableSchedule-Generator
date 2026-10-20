@@ -37,7 +37,7 @@ export default function ScheduleEditor({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ newRunId: number; description: string } | null>(null);
 
-  const sessions = schedule.assignments ?? [];
+  const sessions = useMemo(() => schedule.assignments ?? [], [schedule.assignments]);
   const byDay = useMemo(() => {
     const groups: Record<string, any[]> = {};
     for (const a of sessions) {

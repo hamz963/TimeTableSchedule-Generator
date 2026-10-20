@@ -14,7 +14,7 @@ export default function Home() {
         <Card title="Optimized, not just feasible" href="/benchmark" link="Run benchmark">
           Every timetable gets a 0–100 quality score across teacher preferences,
           time-of-day fit, room efficiency, fairness and compactness — with a
-          benchmark proving the optimizer's gain over a greedy baseline.
+          benchmark proving the optimizer&apos;s gain over a greedy baseline.
         </Card>
         <Card title="Rules that actually apply" href="/constraints" link="Constraints">
           Declarative rules — <em>course before course</em>, <em>no Friday labs</em>,

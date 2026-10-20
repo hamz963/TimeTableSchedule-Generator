@@ -43,7 +43,7 @@ export default function BenchmarkPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Optimizer benchmark</h1>
       <p className="max-w-2xl text-gray-600 dark:text-gray-400">
-        Proves the metaheuristic's value: the same synthetic instance is solved
+        Proves the metaheuristic&apos;s value: the same synthetic instance is solved
         with a greedy constructor alone, then improved by simulated annealing.
         Lower cost is better; the quality score is 0–100.
       </p>

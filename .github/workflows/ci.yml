@@ -44,6 +44,11 @@ jobs:
           DATABASE_URL="sqlite:////tmp/ci-migrate.db" alembic downgrade base
           DATABASE_URL="sqlite:////tmp/ci-migrate.db" alembic upgrade head
 
+      - name: Feasibility fuzz (independent DFS oracle)
+        working-directory: backend
+        # Guards against the solver calling a satisfiable instance infeasible.
+        run: python scripts/feasibility_fuzz.py --trials 30 --seed 7
+
   frontend:
     name: Frontend build (Next.js)
     runs-on: ubuntu-latest
@@ -60,6 +65,14 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm test
 
       - name: Type-check and build
         working-directory: frontend
