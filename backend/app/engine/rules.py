@@ -19,10 +19,42 @@ Built-in kinds (:func:`rule_catalog` returns their schemas):
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from app.engine.context import DAY_ORDER, ProblemContext
+
+
+def _slot_order(ctx: ProblemContext) -> Dict[int, int]:
+    """Map every slot id to its position in the week (index 0 = earliest)."""
+    ordered = sorted((s["id"] for s in ctx.slots), key=ctx.ordered_slot_position)
+    return {sid: i for i, sid in enumerate(ordered)}
+
+
+def _by_course_slot(x: Dict[Any, Any]) -> Dict[Tuple[int, int], Any]:
+    """Collapse ``x[(cid, vid, sid)]`` into one 0/1 expression per (course, slot)."""
+    out: Dict[Tuple[int, int], Any] = {}
+    for key, var in x.items():
+        if not isinstance(key, tuple) or len(key) != 3:
+            continue
+        cid, _vid, sid = key
+        out[(cid, sid)] = out.get((cid, sid), 0) + var
+    return out
+
+
+def _by_course_day(x: Dict[Any, Any], ctx: ProblemContext) -> Dict[Tuple[int, str], Any]:
+    """Collapse variables into one 0/1 expression per (course, day)."""
+    out: Dict[Tuple[int, str], Any] = {}
+    for key, var in x.items():
+        if not isinstance(key, tuple) or len(key) != 3:
+            continue
+        cid, _vid, sid = key
+        day = ctx.slot_day.get(sid)
+        if day is None:
+            continue
+        out[(cid, day)] = out.get((cid, day), 0) + var
+    return out
 
 
 class RuleError(ValueError):
@@ -209,6 +241,31 @@ class CourseBeforeRule(Rule):
             return [f"rule '{self.describe()}': {sorted(self.a)} must precede {sorted(self.b)}"]
         return []
 
+    def cp_compile(self, ctx, model, x) -> bool:
+        """Every session of A strictly before every session of B.
+
+        For each (a, b) pair and each candidate slot of ``a``: "a sits here"
+        implies "b is not in this slot or any earlier one". Linear, no
+        quadratic terms, and it matches ``full_check`` exactly.
+        """
+        order = _slot_order(ctx)
+        if not order:
+            return True
+        per_slot = _by_course_slot(x)
+        slots = sorted(order, key=order.get)
+        for a in self.a:
+            for b in self.b:
+                for sa in slots:
+                    here = per_slot.get((a, sa))
+                    if here is None:
+                        continue
+                    earlier_b = [per_slot[(b, sb)] for sb in slots
+                                 if order[sb] <= order[sa] and (b, sb) in per_slot]
+                    terms = [here, *earlier_b]
+                    if len(terms) > 1:
+                        model.Add(sum(terms) <= 1)
+        return True
+
 
 class SameDayRule(Rule):
     """All listed sessions meet on the same day."""
@@ -233,6 +290,23 @@ class SameDayRule(Rule):
                 continue
             if ctx.slot_day.get(placement[other][1]) != day:
                 return False
+        return True
+
+    def cp_compile(self, ctx, model, x) -> bool:
+        """All listed sessions share one day: equal per-day occupancy for every pair."""
+        per_day = _by_course_day(x, ctx)
+        members = [c for c in sorted(self.courses) if any((c, d) in per_day for d in ctx.days)]
+        for day in ctx.days:
+            for first, second in zip(members, members[1:]):
+                ea, eb = per_day.get((first, day)), per_day.get((second, day))
+                if ea is None and eb is None:
+                    continue
+                if ea is None:
+                    model.Add(eb == 0)
+                elif eb is None:
+                    model.Add(ea == 0)
+                else:
+                    model.Add(ea == eb)
         return True
 
 
@@ -262,6 +336,18 @@ class NoSameDayRule(Rule):
                     if ctx.slot_day[placement[a][1]] == ctx.slot_day[placement[b][1]]:
                         return [f"rule '{self.describe()}': sessions {a} and {b} share a day"]
         return []
+
+    def cp_compile(self, ctx, model, x) -> bool:
+        """Two groups never share a day: at most one group occupies each day."""
+        per_day = _by_course_day(x, ctx)
+        for day in ctx.days:
+            for a in self.a:
+                for b in self.b:
+                    ea, eb = per_day.get((a, day)), per_day.get((b, day))
+                    if ea is None or eb is None:
+                        continue
+                    model.Add(ea + eb <= 1)
+        return True
 
 
 class PreferredDayRule(Rule):

@@ -84,6 +84,17 @@ def validate_generate_request(payload: Dict[str, Any]) -> None:
         ]
         _require(bool(capable), f"course {c.get('id')}: no venue satisfies capacity/equipment")
 
+    # Duration sanity: a session must fit some slot (a 2-hour lab in a 1-hour grid
+    # is unschedulable, and the solver would otherwise silently overbook the block).
+    longest_slot = max((int(s.get("duration_minutes", 60) or 60) for s in slots), default=0)
+    for c in courses:
+        need = int(c.get("duration_minutes", 0) or 0)
+        _require(
+            not need or need <= longest_slot,
+            f"course {c.get('id')}: {need} min session is longer than the longest slot "
+            f"({longest_slot} min)",
+        )
+
     # Slot sanity: start < end when parseable "HH:MM".
     for s in slots:
         try:

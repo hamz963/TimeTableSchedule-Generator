@@ -40,6 +40,9 @@ class ExactSolver:
         self._by_course_slot: Dict[Tuple[int, int], List[Tuple[int, int, int]]] = {}
         self._courses: List[Dict[str, Any]] = []
         self._status: str = "unknown"
+        #: Hard rules that could not be encoded. The pipeline refuses to trust a
+        #: model with failures here instead of silently dropping the constraint.
+        self.compile_failures: List[str] = []
 
     def add_variables(self, ctx: ProblemContext) -> None:
         self._courses = ctx.courses
@@ -136,27 +139,38 @@ class ExactSolver:
                 if len(lits) > 1:
                     self.model.Add(sum(lits) <= 1)
 
-        # 8. Break rule: sliding window over the ordered day grid.
+        # 8. Break rule: sliding window over the ordered day grid, *per teacher*.
+        # It used to be applied across every course at once, which capped the
+        # whole school at N back-to-back periods and made ordinary instances
+        # provably infeasible (only masked because the old pipeline ignored
+        # CP-SAT's infeasibility and fell back to greedy).
         if ctx.max_consecutive and ctx.max_consecutive > 0:
-            for day_slot_ids in ctx.slot_ids_by_day.values():
-                window = ctx.max_consecutive + 1
-                for i in range(len(day_slot_ids) - window + 1):
-                    lits = [
-                        self._vars[k]
-                        for c in courses
-                        for sid in day_slot_ids[i:i + window]
-                        for k in self._by_course_slot.get((c["id"], sid), [])
-                    ]
-                    if len(lits) > 1:
-                        self.model.Add(sum(lits) <= ctx.max_consecutive)
+            window = ctx.max_consecutive + 1
+            for f in faculty:
+                fcourses = courses_by_faculty.get(f["id"], [])
+                for day_slot_ids in ctx.slot_ids_by_day.values():
+                    for i in range(len(day_slot_ids) - window + 1):
+                        lits = [
+                            self._vars[k]
+                            for c in fcourses
+                            for sid in day_slot_ids[i:i + window]
+                            for k in self._by_course_slot.get((c["id"], sid), [])
+                        ]
+                        if len(lits) > 1:
+                            self.model.Add(sum(lits) <= ctx.max_consecutive)
 
-        # 9. Declarative rules that can be compiled exactly.
+        # 9. Declarative rules that can be compiled exactly. A rule that fails to
+        # compile is recorded (never swallowed): the pipeline then refuses the
+        # exact result rather than returning a timetable that breaks a hard rule.
+        self.compile_failures = []
         for rule in ctx.rules:
-            if getattr(rule, "hard", True):
-                try:
-                    rule.cp_compile(ctx, self.model, self._vars)
-                except Exception:
-                    pass
+            if not getattr(rule, "hard", True):
+                continue
+            try:
+                if not rule.cp_compile(ctx, self.model, self._vars):
+                    self.compile_failures.append(rule.describe())
+            except Exception as exc:  # pragma: no cover - defensive
+                self.compile_failures.append(f"{rule.describe()}: {exc}")
 
     def add_objectives(self, ctx: ProblemContext, previous: Optional[List[Dict[str, int]]] = None,
                        fairness_weight: int = 1) -> None:

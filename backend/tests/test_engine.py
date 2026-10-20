@@ -133,6 +133,43 @@ def test_fairness_sub_score_is_achievable_not_ideal():
     assert metrics_mod.score(ctx2, {1: (1, 1), 2: (1, 3)})["sub_scores"]["fairness"] == 100.0
 
 
+def test_greedy_keeps_cohorts_apart():
+    """Regression: the heuristic ignored session groups.
+
+    Two sessions of one cohort could be placed in the same slot, so the finished
+    timetable failed verification and the pipeline reported a satisfiable
+    instance as infeasible. The CP-SAT model always had this constraint; the
+    constructive heuristic did not.
+    """
+    slots = [
+        {"id": i * 4 + j + 1, "day_of_week": day,
+         "start_time": f"{8 + j:02d}:00", "end_time": f"{9 + j:02d}:00",
+         "duration_minutes": 60}
+        for i, day in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri"))
+        for j in range(4)
+    ]
+    faculty = [{"id": i + 1, "name": f"T{i + 1}", "max_hours_per_day": 6,
+                "max_days_per_week": 5, "preferences": [], "unavailable_slots": []}
+               for i in range(6)]
+    venues = [{"id": i + 1, "name": f"R{i + 1}", "capacity": 40, "equipment": [],
+               "available_slots": []} for i in range(4)]
+    courses = [
+        {"id": i + 1, "name": f"C{i + 1}", "code": f"C{i + 1}",
+         "faculty_id": (i % 6) + 1, "capacity_required": 30,
+         "duration_minutes": 60, "required_equipment": [], "preferred_time": ""}
+        for i in range(18)
+    ]
+    groups = [list(range(1, 7)), list(range(7, 13)), list(range(13, 19))]
+    ctx = build_context(faculty, venues, slots, courses, session_groups=groups)
+
+    seed = greedy_assign(ctx)
+    assert seed is not None, "greedy should find a feasible seed for this instance"
+    slot_of = {a["course_id"]: a["slot_id"] for a in seed}
+    for group in groups:
+        placed = [slot_of[cid] for cid in group]
+        assert len(set(placed)) == len(placed), f"cohort {group} double-booked"
+
+
 def test_pipeline_small_uses_exact_large_uses_heuristic():
     faculty, venues, slots, courses = make_small_instance()
     small = solve(faculty, venues, slots, courses, time_limit_seconds=5)

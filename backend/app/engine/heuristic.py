@@ -48,7 +48,7 @@ def _rule_order_ranks(ctx: ProblemContext) -> Dict[int, int]:
 
 
 def greedy_assign(
-    ctx: ProblemContext, enforce_rules: bool = True
+    ctx: ProblemContext, enforce_rules: bool = True, variant: int = 0
 ) -> Optional[List[Dict[str, int]]]:
     """Construct a feasible assignment (or None when greedy gets stuck).
 
@@ -56,6 +56,10 @@ def greedy_assign(
     (course_before / same_day / no_same_day); local rules and every built-in
     hard constraint still apply. The optimizer uses this to obtain a seed it
     then repairs back onto the hard-feasible manifold.
+
+    ``variant`` shifts the tie-breaking order, so the pipeline can retry a
+    different construction instead of declaring a satisfiable instance
+    infeasible after one unlucky ordering.
     """
     courses = ctx.courses
     previous = None  # kept for parity; delta stability flows through ctx.previous
@@ -69,8 +73,22 @@ def greedy_assign(
     fac_day_mins: Dict[Tuple[int, str], int] = {}
     chosen: List[Tuple[int, int, int]] = []
     fac_day_idx: Dict[Tuple[int, str], set] = {}
+    # A cohort (or the sessions of one multi-session course) must never be in two
+    # places at once. The CP-SAT model has this constraint; the heuristic did not,
+    # so large instances silently produced invalid timetables.
+    group_slot_used: Dict[Tuple[int, int], int] = {}
 
     group_days: Dict[int, set] = {gi: set() for gi in ctx.group_members}
+
+    # Courses tied together by a hard ``same_day`` rule: once one of them is
+    # placed, the others should look for that day first (the generic candidate
+    # order prefers *unused* days, which fights the rule).
+    same_day_links: Dict[int, set] = {}
+    for rule in ctx.rules:
+        if getattr(rule, "kind", "") == "same_day" and getattr(rule, "hard", True):
+            members = set(getattr(rule, "courses", ()) or ())
+            for cid in members:
+                same_day_links.setdefault(cid, set()).update(members - {cid})
 
     def occupy(cid: int, vid: int, sid: int) -> bool:
         c = ctx.course_by_id.get(cid)
@@ -83,6 +101,9 @@ def greedy_assign(
         fid = c["faculty_id"]
         f = ctx.faculty_by_id.get(fid, {})
         limit = int(f.get("max_hours_per_day", 6)) * 60
+        gi = ctx.group_of.get(cid)
+        if gi is not None and (gi, sid) in group_slot_used:
+            return False
         if (fid, sid) in fac_slot_used:
             return False
         if (vid, sid) in ven_slot_used:
@@ -106,6 +127,8 @@ def greedy_assign(
                     return False
         fac_slot_used.add((fid, sid))
         ven_slot_used.add((vid, sid))
+        if gi is not None:
+            group_slot_used[(gi, sid)] = cid
         fac_day_mins[(fid, day)] = fac_day_mins.get((fid, day), 0) + dur
         if ctx.max_consecutive and ctx.slot_index.get(sid) is not None:
             fac_day_idx.setdefault((fid, day), set()).add(ctx.slot_index[sid])
@@ -193,6 +216,19 @@ def greedy_assign(
 
     for c, cands in with_counts:
         placed = False
+        linked_days = {
+            ctx.slot_day.get(placement[other][1])
+            for other in same_day_links.get(c["id"], ())
+            if other in placement
+        }
+        if linked_days:
+            cands = sorted(cands, key=lambda k: 0 if ctx.slot_day.get(k[2]) in linked_days else 1)
+        if variant:
+            shift = variant
+            cands = sorted(
+                cands,
+                key=lambda k: (ctx.slot_index.get(k[2], 0) + shift) % max(1, len(ctx.slots)),
+            )
         for (_cid, vid, sid) in cands:
             if enforce_rules and not ctx.move_allowed(c["id"], vid, sid, placement):
                 continue

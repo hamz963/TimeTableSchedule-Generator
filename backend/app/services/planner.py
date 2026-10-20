@@ -65,6 +65,12 @@ def resolve_rules(
             params = dict(raw.get("params") or {})
 
             def _course_ref(val, key):
+                """Resolve one course reference or a list of them (names or ids)."""
+                if isinstance(val, (list, tuple, set)):
+                    out: List[int] = []
+                    for item in val:
+                        out.extend(_course_ref(item, key))
+                    return out
                 if isinstance(val, str):
                     if val not in course_sessions:
                         raise ValidationError(f"rule '{kind}': unknown course '{val}' in {key}")

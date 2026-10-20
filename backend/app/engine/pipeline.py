@@ -95,6 +95,7 @@ def solve(
         rules=rules,
     )
     est_vars = len(courses) * len(venues) * len(slots)
+    exact_notes: Optional[Dict[str, Any]] = None
 
     # ---- Tier 1: exact CP-SAT (small + no uncompilable hard rules) ----------
     if est_vars <= JOINT_MODEL_MAX_VARS and not ctx.rules_need_search():
@@ -113,15 +114,44 @@ def solve(
         remaining = max(0.2, time_limit_seconds - elapsed - 0.8)
         solve_budget = min(remaining, 1.5) if greedy is not None else remaining
         status, assignments, objective, _ms = solver.solve(solve_budget)
-        if status in ("infeasible", "timeout", "unknown") and greedy is not None:
+        # Audit the exact result before trusting it: a rule that failed to
+        # compile (or any modelling slip) must not be reported as "optimal".
+        exact_problems: List[str] = []
+        if assignments:
+            exact_problems = verify(
+                assignments, courses, faculty, venues, slots,
+                session_groups, max_consecutive=max_consecutive, ctx=ctx,
+            )
+        compile_failed = bool(solver.compile_failures)
+        if status == "infeasible" and not compile_failed:
+            # CP-SAT proved there is no solution: report that, don't downgrade it
+            # to "the heuristic got stuck" further down.
+            return _finish(ctx, "infeasible", [], started, None, "exact")
+        if status in ("optimal", "feasible") and not exact_problems and not compile_failed:
+            return _finish(ctx, status, assignments, started, objective, "exact")
+        if greedy is not None:
             if not verify(greedy, courses, faculty, venues, slots,
                           session_groups, max_consecutive=max_consecutive, ctx=ctx):
                 return _finish(ctx, "feasible", greedy, started, None, "greedy-fallback")
-        return _finish(ctx, status, assignments, started, objective, "exact")
+        # Fall through to the verified heuristic tier.
+        exact_notes = {
+            "status": status,
+            "rule_compile_failures": list(solver.compile_failures),
+            "violations": exact_problems[:3],
+        }
 
     # ---- Tier 2: greedy seed + simulated annealing --------------------------
-    seed = greedy_assign(ctx, enforce_rules=True)
+    # Restarts matter: the constructor is order-sensitive, so one ordering can
+    # get stuck on a satisfiable instance while another succeeds. Previously a
+    # single failed pass was reported to the user as "infeasible".
+    seed = None
     seed_path = "greedy"
+    for variant in range(6):
+        seed = greedy_assign(ctx, enforce_rules=True, variant=variant)
+        if seed is not None:
+            if variant:
+                seed_path = f"greedy-restart{variant}"
+            break
     if seed is None:
         seed = greedy_assign(ctx, enforce_rules=False)
         seed_path = "greedy-relaxed"
@@ -145,6 +175,7 @@ def solve(
             return _finish(ctx, "infeasible", [], started, None, "heuristic")
 
     stats = {
+        "exact_fallback": exact_notes,
         "cost_start": opt.cost_start,
         "cost_end": opt.cost_end,
         "improved": opt.improved,

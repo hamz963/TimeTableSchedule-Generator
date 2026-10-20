@@ -139,8 +139,23 @@ class ProblemContext:
         return (self.day_index_of(slot_id), self.slot_start.get(slot_id, 0))
 
     # -- user-rule hooks (declarative constraints drive the solver) ------------
+    def fits_in_slot(self, cid: int, sid: int) -> bool:
+        """True when the session actually fits the time block.
+
+        A 2-hour lab cannot sit in a 1-hour slot: without this check the model
+        happily scheduled multi-hour sessions into short blocks, because the
+        course duration was only ever used for workload accounting.
+        """
+        course = self.course_by_id.get(cid, {})
+        need = int(course.get("duration_minutes", 0) or 0)
+        if need <= 0:
+            return True
+        return self.slot_dur.get(sid, need) >= need
+
     def placement_allowed(self, cid: int, vid: int, sid: int) -> bool:
-        """True when every hard rule permits this single placement."""
+        """True when the session fits the slot and every hard rule permits it."""
+        if not self.fits_in_slot(cid, sid):
+            return False
         for rule in self.rules:
             if getattr(rule, "hard", True) and not rule.placement_allowed(self, cid, vid, sid):
                 return False
@@ -175,7 +190,9 @@ class ProblemContext:
             if not getattr(rule, "hard", True):
                 continue
             kind = getattr(rule, "kind", "")
-            if kind not in ("forbid_slot", "fixed_slot"):
+            if kind not in (
+                "forbid_slot", "fixed_slot", "course_before", "same_day", "no_same_day",
+            ):
                 return True
         return False
 

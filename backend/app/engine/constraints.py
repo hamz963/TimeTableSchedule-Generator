@@ -69,6 +69,13 @@ def verify(
             set(v.get("equipment", []) or [])
         ):
             violations.append(f"course {a['course_id']}: missing equipment")
+        need = int(c.get("duration_minutes", 0) or 0)
+        slot_len = ctx.slot_dur.get(a["slot_id"], 0)
+        if need and slot_len < need:
+            violations.append(
+                f"course {a['course_id']}: {need} min session does not fit a "
+                f"{slot_len} min slot"
+            )
         if a["venue_id"] in ctx.venue_allowed and a["slot_id"] not in ctx.venue_allowed[a["venue_id"]]:
             violations.append(f"venue {a['venue_id']} unavailable at slot {a['slot_id']}")
 

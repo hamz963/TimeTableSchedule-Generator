@@ -147,6 +147,74 @@ def test_rebase_rules_shifts_ids():
     assert base_ids  # sanity: original had ids
 
 
+def test_relational_rules_reach_the_exact_solver():
+    """course_before / same_day / no_same_day are encoded in CP-SAT, not just greedy.
+
+    These three used to force the heuristic path on every instance, however
+    small — the exact model only ever saw forbid_slot / fixed_slot.
+    """
+    cases = {
+        "course_before": {"course_a": "Math", "course_b": "Art"},
+        "same_day": {"courses": ["Math", "Art"]},
+        "no_same_day": {"course_a": "Math", "course_b": "Art"},
+    }
+    for kind, params in cases.items():
+        p = build_problem(_problem(rules=[{"kind": kind, "params": params}]))
+        rules = build_rules(p["rules"])
+        result = TimetableSolver.generate(
+            p["faculty"], p["venues"], p["slots"], p["courses"],
+            time_limit_seconds=5, session_groups=p["session_groups"], rules=rules,
+        )
+        assert result.engine["path"] == "exact", f"{kind} did not reach CP-SAT"
+        ctx = build_context(p["faculty"], p["venues"], p["slots"], p["courses"],
+                            session_groups=p["session_groups"], rules=rules)
+        assert verify(result.assignments, p["courses"], p["faculty"], p["venues"],
+                      p["slots"], p["session_groups"], ctx=ctx) == [], kind
+
+
+def test_same_day_is_enforced_exactly():
+    p = build_problem(_problem(rules=[
+        {"kind": "same_day", "params": {"courses": ["Math", "Art"]}}]))
+    rules = build_rules(p["rules"])
+    result = TimetableSolver.generate(
+        p["faculty"], p["venues"], p["slots"], p["courses"],
+        time_limit_seconds=5, session_groups=p["session_groups"], rules=rules,
+    )
+    labels = p["summary"]["course_labels"]
+    days = {s["id"]: s["day_of_week"] for s in p["slots"]}
+    by_label = {labels[str(a["course_id"])]: days[a["slot_id"]] for a in result.assignments}
+    assert by_label["Math"] == by_label["Art"]
+
+
+def test_rule_compile_failure_falls_back_instead_of_silently_dropping(monkeypatch):
+    """A rule that cannot be encoded must not be dropped without a trace.
+
+    The exact path is chosen for this instance; forcing its compile to raise
+    must send the solver down the verified heuristic path, never return an
+    "optimal" timetable that breaks the rule.
+    """
+    from app.engine.rules import ForbidSlotRule
+
+    def explode(self, ctx, model, x):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ForbidSlotRule, "cp_compile", explode)
+    p = build_problem(_problem(rules=[{
+        "kind": "forbid_slot",
+        "params": {"entity": "faculty", "id": "Bob", "days": ["Fri"]},
+    }]))
+    rules = build_rules(p["rules"])
+    result = TimetableSolver.generate(
+        p["faculty"], p["venues"], p["slots"], p["courses"],
+        time_limit_seconds=5, session_groups=p["session_groups"], rules=rules,
+    )
+    assert result.engine["path"] != "exact"
+    ctx = build_context(p["faculty"], p["venues"], p["slots"], p["courses"],
+                        session_groups=p["session_groups"], rules=rules)
+    assert verify(result.assignments, p["courses"], p["faculty"], p["venues"],
+                  p["slots"], p["session_groups"], ctx=ctx) == []
+
+
 def test_preferred_day_is_soft_and_does_not_break_feasibility():
     p = build_problem(_problem(rules=[{
         "kind": "preferred_day", "params": {"course_id": "Math", "days": ["Mon"]}}]))
