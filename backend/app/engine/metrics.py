@@ -58,18 +58,30 @@ def score(ctx: ProblemContext, placement: Dict[int, Tuple[int, int]]) -> Dict[st
     if cap_sum:
         subs["room_efficiency"] = _clamp01(req_sum / cap_sum)
 
-    # Fairness: 1 = perfectly even day load per teacher, 0 = all on one day.
-    need = obj.needed_minutes(ctx)
+    # Fairness: 1 = the busiest day is as light as the load allows, 0 = every
+    # session crammed into one day. The ceiling is the *achievable* busiest day,
+    # not a perfectly equal split (total / active days): sessions are atomic, so
+    # a teacher with one 60-minute session can never reach a 12-minute target per
+    # day — that target scored every teacher 0 and silently killed the metric.
+    session_minutes: Dict[int, List[int]] = defaultdict(list)
     fac_day: Dict[Tuple[int, str], int] = defaultdict(int)
     for cid, (_v, sid) in placement.items():
-        fac_day[(ctx.course_by_id[cid]["faculty_id"], ctx.slot_day.get(sid, "?"))] += ctx.slot_dur.get(sid, 60)
+        fid = ctx.course_by_id[cid]["faculty_id"]
+        dur = ctx.slot_dur.get(sid, 60)
+        session_minutes[fid].append(dur)
+        fac_day[(fid, ctx.slot_day.get(sid, "?"))] += dur
+
     imbalances = []
-    for fid in {k[0] for k in fac_day}:
-        active = obj.active_days(ctx, fid)
-        target = need.get(fid, 0) / active
-        loads = [fac_day.get((fid, d), 0) for d in ctx.days]
-        worst = max(loads) if loads else 0
-        imbalances.append(_clamp01(1.0 - max(0.0, worst - target) / max(target, 1.0)))
+    for fid, mins in session_minutes.items():
+        total = sum(mins)
+        active = max(1, obj.active_days(ctx, fid))
+        even_split = -(-total // active)  # ceil: even spread over active days
+        best_worst = max(max(mins), even_split)  # longest session can't be split
+        worst = max(fac_day.get((fid, d), 0) for d in ctx.days)
+        if total <= best_worst:
+            imbalances.append(1.0)
+        else:
+            imbalances.append(_clamp01(1.0 - (worst - best_worst) / (total - best_worst)))
     if imbalances:
         subs["fairness"] = sum(imbalances) / len(imbalances)
 

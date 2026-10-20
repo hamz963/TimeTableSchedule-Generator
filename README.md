@@ -219,7 +219,7 @@ curl -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
 ## Testing
 
 ```bash
-cd backend && pytest tests/ -q      # 132 tests (~2.5 min incl. the soak test)
+cd backend && pytest tests/ -q      # 133 tests (~2.5 min incl. the soak test)
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same suite, a migration
@@ -241,7 +241,7 @@ solver/planner/API/edit/chat/export suite, request-size caps, and a
 |---|---|
 | Small instances | optimal (CP-SAT), <0.5 s |
 | 50 faculty / 20 rooms / 100 courses, 40 slots | feasible, **no hard violations**, greedy+descent+SA within the budget |
-| Optimizer vs. greedy | **+5.2% cost (1 s) → +7.8% cost (3 s)** on a 50/20/100/40 instance (quality 72.0 → 73.2 → 74.2); the returned timetable **never** scores lower than greedy nor costs more |
+| Optimizer vs. greedy | **+2.7% cost (0.3 s) → +6.1% (1 s) → +8.5% (3 s)** on a 50/20/100/40 instance (quality 79.5 → 83.0 → 84.7 → 86.4); the returned timetable **never** scores lower than greedy nor costs more |
 | Soak: 200 faculty / 40 rooms / 400 courses / 60 slots | feasible, 400/400 scheduled, **0 hard violations**, ~3.6 s wall |
 | Soak: 64 concurrent 100-course solves | 64/64 feasible, median engine time ~4.8 s |
 | Soak: 80 sequential API generations | p50 ~1.23 s, p95 ~1.45 s, max ~1.71 s |
@@ -272,7 +272,7 @@ curl -X POST localhost:8000/quality/benchmark -H "Authorization: Bearer <token>"
 - `backend/app/middleware.py` — per-IP rate limiting (raw ASGI, SSE-safe)
 - `backend/app/services/chat_store.py` — Redis-backed chat state (memory fallback)
 - `backend/app/ml/` — preference learning (RandomForest)
-- `backend/tests/` — 132 tests
+- `backend/tests/` — 133 tests
 - `docs/` — `FYP-defense-deck.md` (+ rendered `FYP-defense-deck.html`,
   rebuilt by `python docs/build_deck.py`) and `FYP-factors-and-rationale.md`
 - `frontend/` — Next.js dashboard (builder, grid, quality panel, view renderer,
@@ -282,7 +282,7 @@ curl -X POST localhost:8000/quality/benchmark -H "Authorization: Bearer <token>"
 
 ## Production readiness — honest status
 
-Verified in this overhaul: **132-test suite green** · engine refactor is
+Verified in this overhaul: **133-test suite green** · engine refactor is
 behaviour-preserving (original 100 tests pass unchanged) · frontend builds
 (Next.js 14.2) · live HTTP smoke test (generate with a rule → quality report →
 benchmark → events) passes against a real server · Redis-backed chat state and

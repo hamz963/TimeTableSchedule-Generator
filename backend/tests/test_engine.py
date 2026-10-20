@@ -99,6 +99,40 @@ def test_metrics_score_bounds_and_grade():
     assert "reasons" in explain and "teachers" in explain
 
 
+def test_fairness_sub_score_is_achievable_not_ideal():
+    """Regression: an even split is often impossible, so it must not be the target.
+
+    Sessions are atomic, so a teacher with one 60-minute session can never hit a
+    ``total / days`` target — every teacher used to score 0 fairness, silently
+    zeroing 15 % of every timetable's quality score. Fairness now compares the
+    busiest day against the lightest busiest day the load allows.
+    """
+    slots = [
+        {"id": i + 1, "day_of_week": day, "start_time": start, "end_time": end,
+         "duration_minutes": 60}
+        for i, (day, start, end) in enumerate(
+            (d, t, f"{int(t[:2]) + 2}:00")
+            for d in ("Mon", "Tue", "Wed", "Thu", "Fri")
+            for t in ("09:00", "11:00")
+        )
+    ]
+    faculty = [{"id": 1, "name": "Solo", "max_hours_per_day": 6,
+                "preferences": [], "unavailable_slots": []}]
+    venues = [{"id": 1, "name": "R1", "capacity": 30, "equipment": [],
+               "available_slots": []}]
+    course = {"id": 1, "name": "C1", "faculty_id": 1, "capacity_required": 30,
+              "duration_minutes": 60, "required_equipment": []}
+    ctx = build_context(faculty, venues, slots, [course])
+    assert metrics_mod.score(ctx, {1: (1, 1)})["sub_scores"]["fairness"] == 100.0
+
+    two = dict(course, id=2, name="C2")
+    ctx2 = build_context(faculty, venues, slots, [course, two])
+    # Both sessions on Monday (slots 1 and 2) = worst case.
+    assert metrics_mod.score(ctx2, {1: (1, 1), 2: (1, 2)})["sub_scores"]["fairness"] == 0.0
+    # One session on Monday, one on Tuesday = the lightest achievable day load.
+    assert metrics_mod.score(ctx2, {1: (1, 1), 2: (1, 3)})["sub_scores"]["fairness"] == 100.0
+
+
 def test_pipeline_small_uses_exact_large_uses_heuristic():
     faculty, venues, slots, courses = make_small_instance()
     small = solve(faculty, venues, slots, courses, time_limit_seconds=5)

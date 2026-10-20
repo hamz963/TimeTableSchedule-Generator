@@ -27,7 +27,7 @@ and optimization problem, not a CRUD exercise. It was chosen because it lets a s
 demonstrate three different competencies end-to-end: **algorithmic optimization** (CP-SAT
 and simulated annealing over real hard/soft constraints), **applied machine learning**
 (preferences learned from scheduler feedback), and **professional software engineering**
-(auth, roles, API design, real-time UI, containerized deployment, 132 tests). Crucially it
+(auth, roles, API design, real-time UI, containerized deployment, 133 tests). Crucially it
 also has **objective, measurable success criteria** — zero hard-constraint violations,
 a quality score, solve time — which makes the project defensible with evidence rather than
 opinion.
@@ -130,8 +130,8 @@ happen.
 | Feasibility (technical) | Runs from `docker compose up`; pure-Python + Node; no special hardware |
 | Complexity / difficulty | Two solvers, rule registry, 14 backend router modules, 13 dashboard pages, ML loop |
 | Scalability | Measured: 200 faculty / 400 courses in 3.63 s, 0 violations; 64 concurrent solves |
-| Correctness guarantee | Independent auditor; 132 tests; equivalence tests (upload ↔ typed input) |
-| Performance evidence | Optimizer +5.2 %/+7.8 % cost, quality 72.0 → 74.2; API p95 1.45 s |
+| Correctness guarantee | Independent auditor; 133 tests; equivalence tests (upload ↔ typed input) |
+| Performance evidence | Optimizer +2.7 %/+6.1 %/+8.5 % cost, quality 79.5 → 86.4; API p95 1.45 s |
 | Security & privacy | JWT + roles + row-scoping, per-IP rate limiting, SSE token auth option |
 | Data integrity & versioning | Run history, master snapshot per run, re-verified manual edits |
 | Reliability / graceful degradation | Redis optional with in-memory fallback; API survives a DB-less boot |
@@ -144,7 +144,7 @@ happen.
 
 - [ ] **Final report** — abstract, intro, literature, methodology, design, implementation, testing, results, discussion, limitations, future work, references, appendices.
 - [ ] **Working source code** — in a repository, with README and licence.
-- [ ] **Test evidence** — `pytest` output (132 passed), benchmark JSON, soak numbers.
+- [ ] **Test evidence** — `pytest` output (133 passed), benchmark JSON, soak numbers.
 - [ ] **User documentation** — how a scheduler uses the system (data import → rules → generate → export).
 - [ ] **Installation/deployment guide** — this project: `docker compose up` + env vars (`docs/` appendix B).
 - [ ] **Poster / presentation** — this deck renders to PDF from the HTML via Ctrl+P.
@@ -192,7 +192,7 @@ happen.
 - **Demo reliability** — run the stack *before* you present; have the recorded fallback ready; use a small instance live and quote the big-instance numbers from the appendix.
 - **Expected questions** — deck §11 lists six, including the two that always come: "is it optimal?" and "how do you know it's valid?". Both have evidence-backed answers.
 - **Code walkthrough** — be ready to open one file and explain it: `engine/optimizer.py` (SA + the non-regression guarantee) or `engine/rules.py` (policy-as-data) are the strongest two.
-- **Know your numbers cold** — 132 tests · +5.2 %/+7.8 % · 72.0 → 74.2 · 400 courses in 3.63 s, 0 violations · 64/64 concurrent · p95 1.45 s.
+- **Know your numbers cold** — 133 tests · +2.7 %/+8.5 % · 79.5 → 86.4 · 400 courses in 3.63 s, 0 violations · 64/64 concurrent · p95 1.45 s.
 - **Know your limitations cold** — examiners respect a candidate who states them before being asked.
 
 ## B8. Factors that carry value after the FYP
@@ -213,7 +213,7 @@ happen.
 - [ ] Objectives table in the report matches the deck (O1–O7) — no drift between documents.
 
 **Evidence**
-- [ ] `cd backend && .venv/bin/python -m pytest tests/ -q` → `132 passed` (screenshot it).
+- [ ] `cd backend && .venv/bin/python -m pytest tests/ -q` → `133 passed` (screenshot it).
 - [ ] `pytest tests/test_soak.py -s -q` output captured for the results chapter.
 - [ ] Benchmark JSON saved (`/quality/benchmark` with seed 12345).
 - [ ] `npx next build` output captured (13 pages / 14 built routes, 87.3 kB shared JS).
@@ -235,7 +235,7 @@ happen.
 | Objectives not verifiable | Vague aims ("improve scheduling") | each objective names its verification method |
 | Over-claiming | "fully optimal", "scales to 1000 users" | `converged` flag, honest limitation slides, projections labelled as projections |
 | Scope creep / unfinished scope | exams, SIS, mobile all attempted | explicit out-of-scope slide |
-| Untested claims | no regression safety net | 132 tests, including equivalence and security tests |
+| Untested claims | no regression safety net | 133 tests, including equivalence and security tests |
 | Unsafe defaults ignored | dev secrets shipped | `JWT_SECRET` warning, rate limiting, roles, row-scoping documented |
 | Circular evidence | trusting the solver's own validation | independently written verifier as the test oracle |
 | No reproducibility | "it worked on my laptop" | Docker Compose + one-line reproduction commands |
